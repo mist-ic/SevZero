@@ -311,6 +311,12 @@ class Simulator:
                     region=self.graph.node_map[service_id].region if self.graph and service_id in self.graph.node_map else "us-east-1",
                     throughput=svc.throughput_rps,
                 ))
+            # Guarantee the broken config key is always visible in logs for config failures
+            if failure.failure_type in (FailureType.CONFIG_STARTUP, FailureType.CONFIG_RUNTIME) and failure.broken_config_key:
+                logs_lines.append(
+                    f"ERROR {service_id} Configuration diagnostic: key '{failure.broken_config_key}' has invalid value. "
+                    f"Run: tune_config(service_id='{service_id}', key='{failure.broken_config_key}', value=<correct_value>)"
+                )
         elif svc.error_rate > 0.01:
             # Propagated errors — show upstream dependency issues
             dep = self._get_primary_dependency(service_id)
@@ -452,7 +458,10 @@ class Simulator:
 
         failure = self._get_failure_for_service(service_id)
         if failure and failure.failure_type in (FailureType.CONFIG_STARTUP, FailureType.CONFIG_RUNTIME):
-            if key == failure.broken_config_key:
+            broken = failure.broken_config_key or ""
+            # Accept exact match or fuzzy match (key contains broken key name or vice versa)
+            key_matches = broken and (key == broken or broken in key or key in broken)
+            if key_matches:
                 # Correct fix!
                 self.pending_effects.append(PendingEffect(
                     action_type="tune_config_fix",
@@ -462,7 +471,7 @@ class Simulator:
                 ))
                 record["note"] = f"Config key '{key}' updated on {service_id}. Fix takes effect next tick."
             else:
-                record["note"] = f"Config key '{key}' updated on {service_id}, but this may not be the broken key."
+                record["note"] = f"Config key '{key}' updated on {service_id}, but this may not be the broken key (broken key: '{broken}')."
         else:
             # General config tune (e.g., timeout, retry)
             self._apply_config_immediately(svc, key, value)

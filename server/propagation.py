@@ -309,8 +309,12 @@ def propagate_failures(
             base_p99 = 100.0  # Baseline p99 in ms
             state.update_latency_percentiles(base_p99, q_mult, rng)
 
-        # Combine direct failure error rate with propagation error rate
-        combined_error = max(state.error_rate, state.propagation_error_rate)
+        # Combine direct failure error rate with propagation error rate.
+        # Services with no direct failure recover naturally when upstream heals.
+        if state.has_active_failure:
+            combined_error = max(state.error_rate, state.propagation_error_rate)
+        else:
+            combined_error = state.propagation_error_rate
         state.error_rate = min(1.0, combined_error)
 
         # Compute throughput (inverse of error rate, scaled by arrival)
