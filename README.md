@@ -6,7 +6,7 @@ Built with [OpenEnv](https://github.com/meta-pytorch/OpenEnv) for the **OpenEnv 
 
 ## Why SRE Incident Response?
 
-Incident response is one of the most expensive and error-prone aspects of running production systems. Engineers must rapidly diagnose root causes from noisy signals, contain blast radius, and restore service health — often under 3 AM pressure. SevZero provides a realistic simulation environment for training and evaluating AI agents on this critical task.
+Incident response is one of the most expensive and error-prone aspects of running production systems. Engineers must rapidly diagnose root causes from noisy signals, contain blast radius, and restore service health, often under 3 AM pressure. SevZero provides a realistic simulation environment for training and evaluating AI agents on this critical task.
 
 The environment models:
 - **Realistic microservice topologies** with typed service layers (edge, identity, business, infrastructure)
@@ -155,7 +155,3 @@ models.py             ← Pydantic API contract (Action, Observation, State)
 ```
 
 The simulator runs a tick-based loop: each step, failures evolve their metric signatures, propagation cascades through the dependency graph via queueing theory, pending remediation effects resolve after their delay, and the agent receives an updated observation.
-
-## License
-
-MIT
