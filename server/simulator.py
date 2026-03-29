@@ -745,8 +745,12 @@ class Simulator:
         """Check if the episode should end."""
         slo = self.get_slo_score()
 
-        # Success: all SLOs met
-        if slo >= 1.0:
+        # Success: all SLOs met AND all injected failures have been remediated
+        all_remediated = all(
+            spec.service_id in self.remediated_services
+            for spec in self.failures
+        )
+        if slo >= 1.0 and all_remediated:
             self.terminated = True
             self.termination_reason = "resolved"
             return
