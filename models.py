@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from openenv.core.env_server import Action, Observation, State
 
@@ -18,22 +18,6 @@ from openenv.core.env_server import Action, Observation, State
 # ---------------------------------------------------------------------------
 # Sub-models: nested inside SevZeroObservation
 # ---------------------------------------------------------------------------
-
-
-class CircuitBreakerInfo(dict):
-    """Maps dependency name -> breaker state ('CLOSED' | 'OPEN' | 'HALF_OPEN')."""
-
-
-class ServiceInfo(object):
-    """Per-service observable state — declared as plain dict in observation for
-    JSON-serialisability; structured via ServiceInfoModel for validation."""
-
-
-class ServiceInfoModel:
-    """Pydantic model for a single service's metrics (used internally)."""
-
-
-from pydantic import BaseModel
 
 
 class ServiceInfoModel(BaseModel):
