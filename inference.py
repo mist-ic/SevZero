@@ -149,7 +149,8 @@ def run_episode(
         json={"seed": seed, "task_id": task_id},
         timeout=30.0,
     )
-    obs = reset_resp.json()
+    resp_data = reset_resp.json()
+    obs = resp_data.get("observation", resp_data)
 
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -158,8 +159,9 @@ def run_episode(
     max_steps = obs.get("max_steps", 10)
     total_reward = 0.0
 
+    done = resp_data.get("done", False)
     for step_num in range(max_steps):
-        if obs.get("done", False):
+        if done:
             break
 
         user_msg = build_observation_prompt(obs)
@@ -186,11 +188,13 @@ def run_episode(
         # Step the environment
         step_resp = httpx.post(
             f"{base}/step",
-            json={"action_type": action.get("action_type", "noop"), "params": action.get("params", {})},
+            json={"action": {"action_type": action.get("action_type", "noop"), "params": action.get("params", {})}},
             timeout=30.0,
         )
-        obs = step_resp.json()
-        reward = obs.get("reward", 0.0)
+        resp_data = step_resp.json()
+        obs = resp_data.get("observation", resp_data)
+        done = resp_data.get("done", False)
+        reward = obs.get("reward") or resp_data.get("reward") or 0.0
         total_reward += reward if reward else 0.0
 
     # Get final state

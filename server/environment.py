@@ -33,6 +33,12 @@ class SevZeroEnvironment(Environment[SevZeroAction, SevZeroObservation, SevZeroS
         self._seed: Optional[int] = None
         self._step_count: int = 0
 
+    def close(self) -> None:
+        # No-op: the SDK calls close() after every HTTP request, but we need
+        # state to persist between reset() and step() calls in HTTP mode.
+        # WebSocket sessions manage their own lifecycle.
+        pass
+
     def get_metadata(self) -> EnvironmentMetadata:
         return EnvironmentMetadata(
             name="sevzero",

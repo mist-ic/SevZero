@@ -1,8 +1,14 @@
 """
 server/app.py — FastAPI application wiring.
 
-Uses OpenEnv SDK's create_app() for core endpoints (/reset, /step, /state, /ws, /health),
-then adds custom routes for /tasks, /grader, and /baseline.
+Uses OpenEnv SDK's create_app() for WebSocket and standard endpoints
+(/ws, /health, /schema, /metadata), then adds our own HTTP routes for
+/reset, /step, /state, /tasks, /grader that use a singleton environment.
+
+The SDK's HTTP /reset and /step are stateless (new env per request),
+which doesn't work for our multi-step episodes. The WebSocket path
+(used by the actual hackathon evaluation) handles sessions correctly.
+We override the HTTP paths for testing and inference.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI
 from openenv.core.env_server import create_app
+from openenv.core.env_server.serialization import serialize_observation
 from pydantic import BaseModel
 
 from models import SevZeroAction, SevZeroObservation
@@ -18,14 +25,63 @@ from server.environment import SevZeroEnvironment
 from server.grader import grade_episode
 from server.scenarios import TASK_DEFINITIONS
 
+# Singleton environment for HTTP mode
+_env = SevZeroEnvironment()
 
-# Create the OpenEnv app (wires /reset, /step, /state, /ws, /health, /schema, /metadata)
+# Create the OpenEnv app (wires /ws, /health, /schema, /metadata, /mcp)
 app = create_app(
     SevZeroEnvironment,
     SevZeroAction,
     SevZeroObservation,
     env_name="sevzero",
 )
+
+
+# ---------------------------------------------------------------------------
+# Override HTTP endpoints with stateful versions
+# ---------------------------------------------------------------------------
+
+
+class ResetRequest(BaseModel):
+    seed: Optional[int] = None
+    episode_id: Optional[str] = None
+    task_id: str = "easy"
+
+
+class StepRequest(BaseModel):
+    action: Dict[str, Any]
+    timeout_s: Optional[float] = None
+
+
+# Remove SDK's stateless routes and replace with ours
+_routes_to_remove = {"/reset", "/step", "/state"}
+app.routes[:] = [r for r in app.routes if getattr(r, "path", None) not in _routes_to_remove]
+
+
+@app.post("/reset")
+async def reset_env(request: ResetRequest) -> Dict[str, Any]:
+    """Reset the environment and return initial observation."""
+    obs = _env.reset(
+        seed=request.seed,
+        episode_id=request.episode_id,
+        task_id=request.task_id,
+    )
+    return serialize_observation(obs)
+
+
+@app.post("/step")
+async def step_env(request: StepRequest) -> Dict[str, Any]:
+    """Execute an action and return the new observation."""
+    action = SevZeroAction(**request.action)
+    obs = _env.step(action, timeout_s=request.timeout_s)
+    return serialize_observation(obs)
+
+
+@app.get("/state")
+async def get_state() -> Dict[str, Any]:
+    """Return the current environment state."""
+    state = _env.state
+    return state.model_dump()
 
 
 # ---------------------------------------------------------------------------
