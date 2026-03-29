@@ -1,0 +1,24 @@
+=== Observation fields ===
+done: annotation=bool required=False default=False description='Whether the episode has terminated'
+reward: annotation=Union[bool, int, float, NoneType] required=False default=None description='Reward signal from the last action'
+metadata: annotation=Dict[str, Any] required=False default_factory=dict description='Additional metadata for the observation'
+
+=== State fields ===
+episode_id: annotation=Union[str, NoneType] required=False default=None description='Unique identifier for the current episode'
+step_count: annotation=int required=False default=0 description='Number of steps taken in the current episode' metadata=[Ge(ge=0)]
+
+=== Action fields ===
+metadata: annotation=Dict[str, Any] required=False default_factory=dict description='Additional metadata for the action'
+
+=== Environment methods ===
+_apply_rubric(self, action: ~ActT, observation: ~ObsT) -> float
+_apply_rubric_async(self, action: ~ActT, observation: ~ObsT) -> float
+_apply_transform(self, observation: ~ObsT) -> ~ObsT
+_reset_rubric(self) -> None
+_reset_rubric_async(self) -> None
+close(self) -> None
+get_metadata(self) -> openenv.core.env_server.types.EnvironmentMetadata
+reset(self, seed: Optional[int] = None, episode_id: Optional[str] = None, **kwargs: Any) -> ~ObsT
+reset_async(self, seed: Optional[int] = None, episode_id: Optional[str] = None, **kwargs: Any) -> ~ObsT
+step(self, action: ~ActT, timeout_s: Optional[float] = None, **kwargs: Any) -> ~ObsT
+step_async(self, action: ~ActT, timeout_s: Optional[float] = None, **kwargs: Any) -> ~ObsT

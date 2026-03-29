@@ -1,0 +1,10 @@
+name: sevzero
+version: "1.0.0"
+description: "SRE Incident Response Environment — an autonomous on-call SRE managing a microservice cluster undergoing cascading failures"
+tags:
+  - openenv
+  - sre
+  - incident-response
+  - reinforcement-learning
+  - microservices
+  - agentic
