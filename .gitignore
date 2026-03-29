@@ -3,3 +3,11 @@ Docs/
 
 # OpenEnv preparatory course (dev reference only, not part of submission)
 openenv-course/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
