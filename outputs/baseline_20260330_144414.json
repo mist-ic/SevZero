@@ -1,0 +1,41 @@
+{
+  "run_at": "20260330_144414",
+  "model": "llama-3.3-70b-versatile",
+  "api_base_url": "https://api.groq.com/openai/v1",
+  "average_score": 0.8844,
+  "results": [
+    {
+      "task_id": "easy",
+      "seed": 42,
+      "total_reward": 9.9,
+      "score": 0.93,
+      "slo_recovery": 1.0,
+      "action_efficiency": 0.8333,
+      "time_efficiency": 0.7,
+      "steps_taken": 3,
+      "termination_reason": "resolved"
+    },
+    {
+      "task_id": "medium",
+      "seed": 123,
+      "total_reward": 7.1222,
+      "score": 0.9325,
+      "slo_recovery": 1.0,
+      "action_efficiency": 0.75,
+      "time_efficiency": 0.8,
+      "steps_taken": 4,
+      "termination_reason": "resolved"
+    },
+    {
+      "task_id": "hard",
+      "seed": 7,
+      "total_reward": -3.3000000000000007,
+      "score": 0.7906,
+      "slo_recovery": 0.88,
+      "action_efficiency": 0.9,
+      "time_efficiency": 0.264,
+      "steps_taken": 50,
+      "termination_reason": "timeout"
+    }
+  ]
+}

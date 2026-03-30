@@ -20,6 +20,8 @@ import json
 import os
 import time
 import textwrap
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List
 
 from openai import OpenAI
@@ -30,14 +32,21 @@ MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 
 # Fallback providers tried in order if the primary hits rate limits or errors.
 # Each uses the same HF_TOKEN env var as the API key — all are OpenAI-compatible.
+_GROQ_BACKUP_KEY = os.getenv("GROQ_BACKUP_KEY")
 _FALLBACK_PROVIDERS = [
-    # Tier 1 fallback: same Groq key, lighter model (14,400 RPD free)
+    # Tier 1 fallback: backup Groq account, same strong model (fresh 100k TPD)
+    *([{
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "llama-3.3-70b-versatile",
+        "api_key": _GROQ_BACKUP_KEY,
+    }] if _GROQ_BACKUP_KEY else []),
+    # Tier 2 fallback: same Groq key, lighter model (14,400 RPD free)
     {
         "base_url": "https://api.groq.com/openai/v1",
         "model": "llama-3.1-8b-instant",
         "api_key": API_KEY,
     },
-    # Tier 2 fallback: HuggingFace Inference Router
+    # Tier 3 fallback: HuggingFace Inference Router
     {
         "base_url": "https://router.huggingface.co/v1",
         "model": "Qwen/Qwen2.5-72B-Instruct",
@@ -340,6 +349,23 @@ def main() -> None:
         print(f"  {r['task_id']:8s} score={r['score']:.4f}  slo={r['slo_recovery']:.4f}  steps={r['steps_taken']}")
     avg_score = sum(r["score"] for r in results) / len(results) if results else 0.0
     print(f"\n  Average score: {avg_score:.4f}")
+
+    # Save results to outputs/
+    outputs_dir = Path(__file__).parent / "outputs"
+    outputs_dir.mkdir(exist_ok=True)
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    payload = {
+        "run_at": run_ts,
+        "model": MODEL_NAME,
+        "api_base_url": API_BASE_URL,
+        "average_score": round(avg_score, 4),
+        "results": results,
+    }
+    out_file = outputs_dir / f"baseline_{run_ts}.json"
+    latest_file = outputs_dir / "baseline_latest.json"
+    out_file.write_text(json.dumps(payload, indent=2))
+    latest_file.write_text(json.dumps(payload, indent=2))
+    print(f"\n  Results saved -> {out_file.name}")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,12 @@
+---
+title: SevZero
+emoji: 🔥
+colorFrom: red
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # SevZero — SRE Incident Response Environment
 
 A reinforcement learning environment where AI agents act as autonomous on-call Site Reliability Engineers managing microservice clusters undergoing cascading failures.
@@ -70,6 +79,19 @@ score = slo_recovery × 0.70 + action_efficiency × 0.15 + time_efficiency × 0.
 - **Time Efficiency (15%)**: How quickly the agent resolves the incident relative to the step budget
 
 A +10% bonus is applied when the episode terminates with full resolution (all failures remediated, SLO = 1.0).
+
+## Baseline Scores
+
+Baseline agent: `llama-3.3-70b-versatile` via Groq (greedy, single-pass, no fine-tuning).
+
+| Task | Score | SLO Recovery | Action Efficiency | Time Efficiency | Steps | Outcome |
+|------|-------|-------------|-------------------|-----------------|-------|---------|
+| easy | 0.9300 | 1.0000 | 0.8333 | 0.7000 | 3/10 | resolved |
+| medium | 0.9325 | 1.0000 | 0.7500 | 0.8000 | 4/20 | resolved |
+| hard | 0.7906 | 0.8800 | 0.9000 | 0.2640 | 50/50 | timeout |
+| **avg** | **0.8844** | **0.9600** | **0.8278** | **0.5880** | | |
+
+Full results are saved to `outputs/baseline_latest.json`.
 
 ## Setup
 
