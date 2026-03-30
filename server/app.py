@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from openenv.core.env_server import create_app
 from openenv.core.env_server.serialization import serialize_observation
 from pydantic import BaseModel
@@ -59,12 +59,22 @@ app.routes[:] = [r for r in app.routes if getattr(r, "path", None) not in _route
 
 
 @app.post("/reset")
-async def reset_env(request: ResetRequest) -> Dict[str, Any]:
-    """Reset the environment and return initial observation."""
+async def reset_env(raw: Request) -> Dict[str, Any]:
+    """Reset the environment and return initial observation.
+
+    Accepts any body: {}, null, missing, or {"task_id": "hard", "seed": 42}.
+    """
+    try:
+        body = await raw.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    req = ResetRequest(**{k: v for k, v in body.items() if k in ResetRequest.model_fields})
     obs = _env.reset(
-        seed=request.seed,
-        episode_id=request.episode_id,
-        task_id=request.task_id,
+        seed=req.seed,
+        episode_id=req.episode_id,
+        task_id=req.task_id,
     )
     return serialize_observation(obs)
 
