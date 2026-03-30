@@ -111,8 +111,10 @@ def _call_llm(
                 model=provider["model"],
                 messages=messages,
                 temperature=0.2,
-                max_tokens=200,
+                max_tokens=4000,  # Thinking models (Gemini 3.1 Pro, o3) use tokens for reasoning
             )
+            # content can be None for thinking models if limit was too low;
+            # 4000 ensures thinking budget + response both fit
             return completion.choices[0].message.content or ""
         except Exception as e:
             last_err = e
