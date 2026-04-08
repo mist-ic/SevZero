@@ -236,6 +236,21 @@ def parse_action(response_text: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _wait_for_server(base: str, max_wait: int = 90) -> None:
+    """Poll /health until server is ready or timeout."""
+    import httpx, time
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        try:
+            r = httpx.get(f"{base}/health", timeout=5.0)
+            if r.status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(3)
+    raise RuntimeError(f"Server at {base} not ready after {max_wait}s")
+
+
 def run_episode(
     client: OpenAI,
     task_id: str,
@@ -244,6 +259,9 @@ def run_episode(
     import httpx
 
     base = ENV_URL.rstrip("/")
+
+    # Wait for server to be ready (handles startup race condition)
+    _wait_for_server(base)
 
     # Reset environment
     reset_resp = httpx.post(
@@ -306,14 +324,15 @@ def run_episode(
 
         print(f"  Step {step_num}: {act_type}({act_params})", flush=True)
 
-        step_resp = httpx.post(
-            f"{base}/step",
-            json={"action": {"action_type": act_type, "params": act_params}},
-            timeout=30.0,
-        )
         try:
+            step_resp = httpx.post(
+                f"{base}/step",
+                json={"action": {"action_type": act_type, "params": act_params}},
+                timeout=30.0,
+            )
             resp_data = step_resp.json()
-        except Exception:
+        except Exception as e:
+            print(f"  [step error] {e}", flush=True)
             resp_data = {}
 
         obs = resp_data.get("observation", resp_data)
@@ -337,19 +356,25 @@ def run_episode(
                 tried_actions[act_type].append(entry)
 
     # Grade the episode
-    final_state = httpx.get(f"{base}/state", timeout=10.0).json()
-    grade = httpx.post(
-        f"{base}/grader",
-        json={
-            "final_slo_score": final_state.get("global_slo_score", 0.0),
-            "steps_taken": final_state.get("step_count", 0),
-            "max_steps": max_steps,
-            "actions_taken": obs.get("actions_taken", []),
-            "terminated": final_state.get("terminated", True),
-            "termination_reason": final_state.get("termination_reason"),
-        },
-        timeout=10.0,
-    ).json()
+    try:
+        final_state = httpx.get(f"{base}/state", timeout=10.0).json()
+    except Exception:
+        final_state = {}
+    try:
+        grade = httpx.post(
+            f"{base}/grader",
+            json={
+                "final_slo_score": final_state.get("global_slo_score", 0.0),
+                "steps_taken": final_state.get("step_count", 0),
+                "max_steps": max_steps,
+                "actions_taken": obs.get("actions_taken", []),
+                "terminated": final_state.get("terminated", True),
+                "termination_reason": final_state.get("termination_reason"),
+            },
+            timeout=10.0,
+        ).json()
+    except Exception:
+        grade = {}
 
     score = grade.get("score", 0.0)
     outcome = final_state.get("termination_reason", "timeout")
