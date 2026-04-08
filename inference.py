@@ -117,25 +117,28 @@ def _track_usage(completion: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+MAX_LLM_RETRIES = 3
+
+
 def _call_llm(messages: List[Dict[str, Any]], client: OpenAI) -> str:
-    """Call the LLM with exponential backoff retry. Returns raw response text."""
-    attempt = 0
-    while True:
+    """Call the LLM with bounded retry. Returns raw response text."""
+    for attempt in range(1, MAX_LLM_RETRIES + 1):
         try:
             completion = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=messages,
                 temperature=0,
-                max_tokens=1024,
+                max_tokens=512,
+                timeout=30.0,
             )
             _track_usage(completion)
             return completion.choices[0].message.content or ""
         except Exception as e:
-            attempt += 1
-            wait = min(10 * (2 ** (attempt - 1)), 60)
-            print(f"  [attempt {attempt}] {MODEL_NAME} error: {e}", flush=True)
-            print(f"  [retry] waiting {wait}s...", flush=True)
-            time.sleep(wait)
+            print(f"  [attempt {attempt}/{MAX_LLM_RETRIES}] {MODEL_NAME} error: {e}", flush=True)
+            if attempt < MAX_LLM_RETRIES:
+                wait = min(5 * attempt, 15)
+                time.sleep(wait)
+    return '{"action_type": "noop", "params": {}}'
 
 
 # ---------------------------------------------------------------------------
@@ -236,19 +239,20 @@ def parse_action(response_text: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _wait_for_server(base: str, max_wait: int = 90) -> None:
+def _wait_for_server(base: str, max_wait: int = 30) -> None:
     """Poll /health until server is ready or timeout."""
-    import httpx, time
+    import httpx
     deadline = time.time() + max_wait
     while time.time() < deadline:
         try:
             r = httpx.get(f"{base}/health", timeout=5.0)
             if r.status_code == 200:
+                print(f"  Server ready at {base}", flush=True)
                 return
         except Exception:
             pass
-        time.sleep(3)
-    raise RuntimeError(f"Server at {base} not ready after {max_wait}s")
+        time.sleep(2)
+    print(f"  [warn] Server not confirmed ready after {max_wait}s, proceeding anyway", flush=True)
 
 
 def run_episode(
@@ -260,16 +264,21 @@ def run_episode(
 
     base = ENV_URL.rstrip("/")
 
-    # Wait for server to be ready (handles startup race condition)
-    _wait_for_server(base)
-
     # Reset environment
-    reset_resp = httpx.post(
-        f"{base}/reset",
-        json={"seed": seed, "task_id": task_id},
-        timeout=30.0,
-    )
-    resp_data = reset_resp.json()
+    try:
+        reset_resp = httpx.post(
+            f"{base}/reset",
+            json={"seed": seed, "task_id": task_id},
+            timeout=30.0,
+        )
+        resp_data = reset_resp.json()
+    except Exception as e:
+        print(f"  [reset error] {e}", flush=True)
+        log_start(task=task_id, env=ENV_NAME, model=MODEL_NAME)
+        log_end(task=task_id, success=False, steps=0, score=0.0, rewards=[])
+        return {"task_id": task_id, "seed": seed, "score": 0.0, "slo_recovery": 0.0,
+                "action_efficiency": 0.0, "time_efficiency": 0.0, "steps_taken": 0,
+                "termination_reason": "reset_error", "rewards": []}
     obs = resp_data.get("observation", resp_data)
 
     max_steps = obs.get("max_steps", 10)
@@ -296,6 +305,9 @@ def run_episode(
     steps_taken = 0
     for step_num in range(1, max_steps + 1):
         if done:
+            break
+        if _time_remaining() < 30:
+            print(f"  [timeout guard] Stopping episode at step {step_num} — {_time_remaining():.0f}s left", flush=True)
             break
 
         user_msg = build_observation_prompt(obs)
@@ -400,8 +412,22 @@ def run_episode(
 # ---------------------------------------------------------------------------
 
 
+GLOBAL_TIMEOUT = 20 * 60  # 20 minutes hard cap (validator limit is 30 min)
+_start_time: float = 0.0
+
+
+def _time_remaining() -> float:
+    return max(0, GLOBAL_TIMEOUT - (time.time() - _start_time))
+
+
 def main() -> None:
+    global _start_time
+    _start_time = time.time()
+
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+
+    base = ENV_URL.rstrip("/")
+    _wait_for_server(base)
 
     all_tasks = {"easy": 42, "medium": 123, "hard": 7}
     task_filter = os.getenv("TASKS", "").strip()
@@ -418,6 +444,9 @@ def main() -> None:
 
     results = []
     for task_id, seed in tasks:
+        if _time_remaining() < 60:
+            print(f"  [timeout guard] Skipping {task_id} — only {_time_remaining():.0f}s left", flush=True)
+            break
         print(f"--- Task: {task_id} (seed={seed}) ---", flush=True)
         result = run_episode(client, task_id, seed)
         results.append(result)
@@ -453,8 +482,10 @@ def main() -> None:
     out_file.write_text(json.dumps(payload, indent=2))
     print(f"\n  Results saved -> {out_file.name}", flush=True)
 
+    elapsed = time.time() - _start_time
     total = _token_usage["prompt"] + _token_usage["completion"]
-    print(f"\n  Token usage:", flush=True)
+    print(f"\n  Wall time:  {elapsed:.0f}s ({elapsed/60:.1f}min)", flush=True)
+    print(f"  Token usage:", flush=True)
     print(f"    prompt:     {_token_usage['prompt']:,}", flush=True)
     print(f"    completion: {_token_usage['completion']:,}", flush=True)
     print(f"    total:      {total:,}", flush=True)
