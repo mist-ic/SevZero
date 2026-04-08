@@ -314,8 +314,8 @@ class Simulator:
             # Guarantee the broken config key is always visible in logs for config failures
             if failure.failure_type in (FailureType.CONFIG_STARTUP, FailureType.CONFIG_RUNTIME) and failure.broken_config_key:
                 logs_lines.append(
-                    f"ERROR {service_id} Configuration diagnostic: key '{failure.broken_config_key}' has invalid value. "
-                    f"Run: tune_config(service_id='{service_id}', key='{failure.broken_config_key}', value=<correct_value>)"
+                    f"ERROR {service_id} Configuration diagnostic: key '{failure.broken_config_key}' has invalid value '{failure.broken_config_value}'. "
+                    f"Run: tune_config(service_id='{service_id}', key='{failure.broken_config_key}', value='correct') to restore."
                 )
         elif svc.error_rate > 0.01:
             # Propagated errors — show upstream dependency issues
@@ -359,8 +359,14 @@ class Simulator:
             return record
 
         failure = self._get_failure_for_service(service_id)
-        # Restart fixes: CRASH, RESOURCE_LEAK (temporarily), CONFIG_STARTUP (if config was fixed)
-        if failure and failure.failure_type in (FailureType.CRASH, FailureType.RESOURCE_LEAK):
+        # Restart fixes: CRASH, RESOURCE_LEAK, CASCADING_LATENCY (clears thread pool),
+        # DB_DEGRADATION (resets connection pool state)
+        if failure and failure.failure_type in (
+            FailureType.CRASH,
+            FailureType.RESOURCE_LEAK,
+            FailureType.CASCADING_LATENCY,
+            FailureType.DB_DEGRADATION,
+        ):
             delay = self.rng.randint(1, 2)
             self.pending_effects.append(PendingEffect(
                 action_type="restart_service",
@@ -434,9 +440,15 @@ class Simulator:
         max_r = node.max_replicas if node else 8
         target_replicas = max(1, min(target_replicas, max_r))
 
+        failure = self._get_failure_for_service(service_id)
+        # Scaling resolves CASCADING_LATENCY: more capacity drops utilisation below saturation threshold
+        action = "scale_remediate" if (
+            failure and failure.failure_type == FailureType.CASCADING_LATENCY
+        ) else "scale_service"
+
         delay = self.rng.randint(2, 4)
         self.pending_effects.append(PendingEffect(
-            action_type="scale_service",
+            action_type=action,
             target_service=service_id,
             params={"replicas": target_replicas},
             resolve_tick=self.tick + delay,
@@ -502,13 +514,30 @@ class Simulator:
         return record
 
     def _do_rebalance_traffic(self, params: Dict, record: Dict) -> Dict:
-        from_region = params.get("from_region", "")
-        to_region = params.get("to_region", "")
+        # Accept the varied param names models actually send
+        from_region = (
+            params.get("from_region")
+            or params.get("region")
+            or params.get("service_id")
+            or ""
+        )
+        to_region = params.get("to_region") or params.get("target") or ""
         pct = params.get("pct", 50)
+
+        # If only one region given, infer the other from the graph's region list
+        if from_region and not to_region and self.graph:
+            others = [r for r in self.graph.regions if r != from_region]
+            to_region = others[0] if others else ""
+
         record["target"] = f"{from_region}->{to_region}"
 
         if not self.graph or not self.graph.has_multiple_regions:
             record["note"] = "Traffic rebalancing only available in multi-region (hard) mode"
+            return record
+
+        if not from_region:
+            record["success"] = False
+            record["note"] = "rebalance_traffic requires 'from_region' (or 'region') param"
             return record
 
         delay = self.rng.randint(2, 3)
@@ -578,9 +607,11 @@ class Simulator:
                     "ticks_ago": 0,
                 })
 
-        elif effect.action_type == "scale_service":
+        elif effect.action_type in ("scale_service", "scale_remediate"):
             if svc:
                 svc.replicas = effect.params.get("replicas", svc.replicas)
+            if effect.action_type == "scale_remediate":
+                self._remediate_service(effect.target_service)
 
         elif effect.action_type == "tune_config_fix":
             self._remediate_service(effect.target_service)
@@ -605,9 +636,19 @@ class Simulator:
                     if not s:
                         continue
                     if node.region == from_region:
-                        s.arrival_rate *= (1 - pct)
+                        floor = node.base_arrival_rate * 0.2
+                        s.arrival_rate = max(floor, s.arrival_rate * (1 - pct))
                     elif node.region == to_region:
                         s.arrival_rate *= (1 + pct * 0.5)  # Some traffic absorbed
+
+                # If a CASCADING_LATENCY failure exists in from_region and traffic is
+                # significantly shifted away (>= 40%), the load reduction resolves it
+                if pct >= 0.4:
+                    for spec in self.failures:
+                        if spec.failure_type == FailureType.CASCADING_LATENCY:
+                            node = self.graph.node_map.get(spec.service_id)
+                            if node and node.region == from_region:
+                                self._remediate_service(spec.service_id)
 
     def _remediate_service(self, service_id: str) -> None:
         """Mark a service as remediated — stop failure evolution."""

@@ -1,8 +1,8 @@
 {
-  "run_at": "20260330_144414",
-  "model": "llama-3.3-70b-versatile",
-  "api_base_url": "https://api.groq.com/openai/v1",
-  "average_score": 0.8844,
+  "run_at": "20260401_165311",
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "api_base_url": "https://bedrock-runtime.us-east-1.amazonaws.com",
+  "average_score": 0.9187,
   "results": [
     {
       "task_id": "easy",
@@ -18,10 +18,10 @@
     {
       "task_id": "medium",
       "seed": 123,
-      "total_reward": 7.1222,
-      "score": 0.9325,
+      "total_reward": 7.022200000000001,
+      "score": 0.97,
       "slo_recovery": 1.0,
-      "action_efficiency": 0.75,
+      "action_efficiency": 1.0,
       "time_efficiency": 0.8,
       "steps_taken": 4,
       "termination_reason": "resolved"
@@ -29,11 +29,11 @@
     {
       "task_id": "hard",
       "seed": 7,
-      "total_reward": -3.3000000000000007,
-      "score": 0.7906,
-      "slo_recovery": 0.88,
-      "action_efficiency": 0.9,
-      "time_efficiency": 0.264,
+      "total_reward": -2.8000000000000016,
+      "score": 0.8561,
+      "slo_recovery": 0.92,
+      "action_efficiency": 1.0,
+      "time_efficiency": 0.414,
       "steps_taken": 50,
       "termination_reason": "timeout"
     }

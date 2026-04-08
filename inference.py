@@ -26,33 +26,15 @@ from typing import Any, Dict, List
 
 from openai import OpenAI
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
-
-# Fallback providers tried in order if the primary hits rate limits or errors.
-# Each uses the same HF_TOKEN env var as the API key — all are OpenAI-compatible.
-_GROQ_BACKUP_KEY = os.getenv("GROQ_BACKUP_KEY")
-_FALLBACK_PROVIDERS = [
-    # Tier 1 fallback: backup Groq account, same strong model (fresh 100k TPD)
-    *([{
-        "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.3-70b-versatile",
-        "api_key": _GROQ_BACKUP_KEY,
-    }] if _GROQ_BACKUP_KEY else []),
-    # Tier 2 fallback: same Groq key, lighter model (14,400 RPD free)
-    {
-        "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.1-8b-instant",
-        "api_key": API_KEY,
-    },
-    # Tier 3 fallback: HuggingFace Inference Router
-    {
-        "base_url": "https://router.huggingface.co/v1",
-        "model": "Qwen/Qwen2.5-72B-Instruct",
-        "api_key": os.getenv("HF_INFERENCE_TOKEN") or API_KEY,
-    },
-]
+ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
+ENV_NAME = "sevzero"
 
 SYSTEM_PROMPT = textwrap.dedent("""\
     You are an expert Site Reliability Engineer (SRE) responding to a production incident.
@@ -65,9 +47,8 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     2. Diagnose the root cause from log patterns:
        - OOMKilled/CrashLoopBackOff -> restart_service
        - NullPointerException/TypeError + recent deploy -> rollback_service
-       - "password authentication failed"/"config not found" -> tune_config with the broken key
-         (the logs will show: "Configuration diagnostic: key '<KEY>' has invalid value")
-       - Thread pool exhaustion/timeout from downstream -> fix the downstream dependency first
+       - "Configuration diagnostic: key '<KEY>'" -> tune_config with that exact key, value='correct'
+       - Thread pool exhaustion on THIS service -> restart_service or scale_service on THIS service
        - Memory climbing linearly -> restart_service (resource leak)
        - HikariPool exhaustion/slow queries -> scale_service or restart_service on the DB
        - CLUSTERDOWN/cache miss -> clear_cache
@@ -85,83 +66,120 @@ SYSTEM_PROMPT = textwrap.dedent("""\
         {"action_type": "tune_config", "params": {"service_id": "order-service", "key": "api_endpoint", "value": "correct"}}
     - clear_cache:
         {"action_type": "clear_cache", "params": {"cache_name": "redis-cache"}}
+    - rebalance_traffic:
+        {"action_type": "rebalance_traffic", "params": {"from_region": "us-east-1", "to_region": "us-west-2"}}
     - noop:
         {"action_type": "noop", "params": {}}
 """)
 
+# ---------------------------------------------------------------------------
+# Structured logging — required by hackathon evaluator
+# ---------------------------------------------------------------------------
 
-def _call_llm(
-    messages: List[Dict[str, Any]],
-    primary_client: OpenAI,
-    primary_model: str,
-) -> str:
-    """Call LLM with automatic fallback on rate limit or error."""
-    providers = [{"client": primary_client, "model": primary_model}] + [
-        {
-            "client": OpenAI(base_url=p["base_url"], api_key=p["api_key"]),
-            "model": p["model"],
-        }
-        for p in _FALLBACK_PROVIDERS
-    ]
 
-    last_err = None
-    for i, provider in enumerate(providers):
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Any = None) -> None:
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.4f} "
+        f"done={str(done).lower()} error={error}",
+        flush=True,
+    )
+
+
+def log_end(task: str, success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    print(
+        f"[END] task={task} success={str(success).lower()} steps={steps} "
+        f"score={score:.4f} rewards={rewards}",
+        flush=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Token tracking
+# ---------------------------------------------------------------------------
+
+_token_usage: Dict[str, int] = {"prompt": 0, "completion": 0}
+
+
+def _track_usage(completion: Any) -> None:
+    usage = getattr(completion, "usage", None)
+    if not usage:
+        return
+    _token_usage["prompt"] += getattr(usage, "prompt_tokens", 0)
+    _token_usage["completion"] += getattr(usage, "completion_tokens", 0)
+
+
+# ---------------------------------------------------------------------------
+# LLM call — standard OpenAI client, retry on transient errors
+# ---------------------------------------------------------------------------
+
+
+def _call_llm(messages: List[Dict[str, Any]], client: OpenAI) -> str:
+    """Call the LLM with exponential backoff retry. Returns raw response text."""
+    attempt = 0
+    while True:
         try:
-            completion = provider["client"].chat.completions.create(
-                model=provider["model"],
+            completion = client.chat.completions.create(
+                model=MODEL_NAME,
                 messages=messages,
-                temperature=0.2,
-                max_tokens=4000,  # Thinking models (Gemini 3.1 Pro, o3) use tokens for reasoning
+                temperature=0,
+                max_tokens=1024,
             )
-            # content can be None for thinking models if limit was too low;
-            # 4000 ensures thinking budget + response both fit
+            _track_usage(completion)
             return completion.choices[0].message.content or ""
         except Exception as e:
-            last_err = e
-            is_rate_limit = any(x in str(e).lower() for x in ("429", "rate_limit", "quota", "credits", "402"))
-            label = "fallback" if i > 0 else "primary"
-            print(f"  [{label} {provider['model']}] error: {e}")
-            if is_rate_limit and i < len(providers) - 1:
-                time.sleep(3)
-                continue
-            if i < len(providers) - 1:
-                continue
-    print(f"  All providers failed. Last error: {last_err}")
-    return '{"action_type": "noop", "params": {}}'
+            attempt += 1
+            wait = min(10 * (2 ** (attempt - 1)), 60)
+            print(f"  [attempt {attempt}] {MODEL_NAME} error: {e}", flush=True)
+            print(f"  [retry] waiting {wait}s...", flush=True)
+            time.sleep(wait)
+
+
+# ---------------------------------------------------------------------------
+# Observation → prompt
+# ---------------------------------------------------------------------------
 
 
 def build_observation_prompt(obs: Dict[str, Any]) -> str:
-    """Build a concise prompt from the observation."""
     parts = [f"## Incident Status\n{obs.get('observation_summary', 'N/A')}"]
 
-    # Alerts (most important)
     alerts = obs.get("alerts", [])
     if alerts:
         alert_lines = [f"  [{a['severity'].upper()}] {a['message']}" for a in alerts[:10]]
         parts.append("## Active Alerts\n" + "\n".join(alert_lines))
 
-    # Service states (condensed — degraded only)
     services = obs.get("services", [])
     degraded = [s for s in services if s.get("status") in ("degraded", "critical", "down")]
     if degraded:
-        svc_lines = [
-            f"  {s['id']} [{s['status']}]: error={s['error_rate']:.1%}, "
-            f"p99={s['latency_p99_ms']:.0f}ms, cpu={s['cpu_pct']:.0f}%, "
-            f"mem={s['memory_pct']:.0f}%, pool={s['connection_pool_usage_pct']:.0f}%"
-            for s in degraded
-        ]
+        # Identify root causes: services that have OPEN circuit breakers pointing at them
+        # from callers, but do not themselves have OPEN outgoing breakers
+        breaker_targets: set = set()
+        for s in services:
+            for dep, state in s.get("circuit_breakers", {}).items():
+                if state == "OPEN":
+                    breaker_targets.add(dep)
+
+        svc_lines = []
+        for s in degraded:
+            sid = s["id"]
+            own_open = any(v == "OPEN" for v in s.get("circuit_breakers", {}).values())
+            is_root = sid in breaker_targets and not own_open
+            label = " [ROOT CAUSE]" if is_root else " [propagation victim]" if sid not in breaker_targets else ""
+            svc_lines.append(
+                f"  {sid} [{s['status']}]{label}: error={s['error_rate']:.1%}, "
+                f"p99={s['latency_p99_ms']:.0f}ms, cpu={s['cpu_pct']:.0f}%, "
+                f"mem={s['memory_pct']:.0f}%"
+            )
         parts.append("## Degraded Services\n" + "\n".join(svc_lines))
 
-    # Recent deploys
     deploys = obs.get("recent_deploys", [])
     if deploys:
-        dep_lines = [
-            f"  {d['service']} -> {d['version']} ({d['ticks_ago']} ticks ago)"
-            for d in deploys
-        ]
+        dep_lines = [f"  {d['service']} -> {d['version']} ({d['ticks_ago']} ticks ago)" for d in deploys]
         parts.append("## Recent Deploys\n" + "\n".join(dep_lines))
 
-    # Actions taken
     actions = obs.get("actions_taken", [])
     if actions:
         act_lines = [
@@ -170,12 +188,10 @@ def build_observation_prompt(obs: Dict[str, Any]) -> str:
         ]
         parts.append("## Recent Actions\n" + "\n".join(act_lines))
 
-    # Logs (if available from inspect)
     logs = obs.get("logs")
     if logs:
         parts.append(f"## Logs\n{logs}")
 
-    # Traces (if available)
     traces = obs.get("traces")
     if traces:
         error_spans = [s for s in traces.get("spans", []) if s.get("status") == "ERROR"]
@@ -186,7 +202,6 @@ def build_observation_prompt(obs: Dict[str, Any]) -> str:
             ]
             parts.append("## Trace Errors\n" + "\n".join(trace_lines))
 
-    # Legal actions
     legal = obs.get("legal_actions", [])
     if legal:
         legal_strs = [f"  {la['action_type']}: targets={la['valid_targets'][:5]}" for la in legal]
@@ -195,17 +210,17 @@ def build_observation_prompt(obs: Dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
-def parse_action(response_text: str) -> Dict[str, Any]:
-    """Parse the model's JSON response into an action dict."""
-    text = response_text.strip()
+# ---------------------------------------------------------------------------
+# Action parsing
+# ---------------------------------------------------------------------------
 
-    # Strip markdown code blocks
+
+def parse_action(response_text: str) -> Dict[str, Any]:
+    text = response_text.strip()
     if "```json" in text:
         text = text.split("```json")[1].split("```")[0].strip()
     elif "```" in text:
         text = text.split("```")[1].split("```")[0].strip()
-
-    # Extract JSON object
     start = text.find("{")
     end = text.rfind("}") + 1
     if start >= 0 and end > start:
@@ -213,22 +228,24 @@ def parse_action(response_text: str) -> Dict[str, Any]:
             return json.loads(text[start:end])
         except json.JSONDecodeError:
             pass
-
     return {"action_type": "noop", "params": {}}
+
+
+# ---------------------------------------------------------------------------
+# Episode runner
+# ---------------------------------------------------------------------------
 
 
 def run_episode(
     client: OpenAI,
-    env_url: str,
     task_id: str,
-    seed: int = 42,
+    seed: int,
 ) -> Dict[str, Any]:
-    """Run one episode using the OpenEnv HTTP API."""
     import httpx
 
-    base = env_url.rstrip("/")
+    base = ENV_URL.rstrip("/")
 
-    # Reset
+    # Reset environment
     reset_resp = httpx.post(
         f"{base}/reset",
         json={"seed": seed, "task_id": task_id},
@@ -238,58 +255,88 @@ def run_episode(
     obs = resp_data.get("observation", resp_data)
 
     max_steps = obs.get("max_steps", 10)
-    total_reward = 0.0
     done = resp_data.get("done", False)
+    rewards: List[float] = []
 
-    # Rolling conversation: system prompt + last 6 messages (3 turns).
-    # Prevents context explosion on hard tasks (50 steps x ~800 tokens/step).
+    # Persistent episode memory — survives rolling context truncation
     conversation_history: List[Dict[str, Any]] = []
+    tried_actions: Dict[str, List[str]] = {}
+    resolved_services: List[str] = []
 
-    for step_num in range(max_steps):
+    def _build_memory() -> str:
+        if not tried_actions and not resolved_services:
+            return ""
+        lines = ["## Episode Memory (do not repeat failed approaches)"]
+        if resolved_services:
+            lines.append(f"  Resolved: {', '.join(resolved_services)}")
+        for act, targets in tried_actions.items():
+            lines.append(f"  {act}: {'; '.join(targets)}")
+        return "\n".join(lines)
+
+    log_start(task=task_id, env=ENV_NAME, model=MODEL_NAME)
+
+    steps_taken = 0
+    for step_num in range(1, max_steps + 1):
         if done:
             break
 
         user_msg = build_observation_prompt(obs)
         conversation_history.append({"role": "user", "content": user_msg})
 
-        # Keep only last 6 messages (3 user+assistant turns) to bound context size
+        # Rolling window of last 6 messages + persistent memory in system prompt
         trimmed = conversation_history[-6:]
-        messages_to_send = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed
+        memory = _build_memory()
+        system_content = SYSTEM_PROMPT + ("\n\n" + memory if memory else "")
+        messages_to_send = [{"role": "system", "content": system_content}] + trimmed
 
-        response_text = _call_llm(messages_to_send, client, MODEL_NAME)
+        response_text = _call_llm(messages_to_send, client)
         action = parse_action(response_text)
         conversation_history.append({"role": "assistant", "content": response_text})
 
-        print(f"  Step {step_num + 1}: {action.get('action_type', 'noop')}({action.get('params', {})})")
+        act_type = action.get("action_type", "noop")
+        act_params = action.get("params", {})
+        target = act_params.get("service_id") or act_params.get("cache_name") or act_params.get("from_region") or ""
 
-        # Step the environment
-        params = action.get("params", {})
-        # Coerce replicas to int if model sends a string
-        if "replicas" in params:
+        # Coerce replicas to int
+        if "replicas" in act_params:
             try:
-                params["replicas"] = int(params["replicas"])
+                act_params["replicas"] = int(act_params["replicas"])
             except (ValueError, TypeError):
-                params["replicas"] = 2
+                act_params["replicas"] = 2
+
+        print(f"  Step {step_num}: {act_type}({act_params})", flush=True)
 
         step_resp = httpx.post(
             f"{base}/step",
-            json={"action": {
-                "action_type": action.get("action_type", "noop"),
-                "params": params,
-            }},
+            json={"action": {"action_type": act_type, "params": act_params}},
             timeout=30.0,
         )
         try:
             resp_data = step_resp.json()
         except Exception:
-            # Empty or non-JSON response (server error) — treat as noop
             resp_data = {}
+
         obs = resp_data.get("observation", resp_data)
         done = resp_data.get("done", False)
-        reward = obs.get("reward") or resp_data.get("reward") or 0.0
-        total_reward += reward if reward else 0.0
+        reward = float(obs.get("reward") or resp_data.get("reward") or 0.0)
+        rewards.append(reward)
+        steps_taken = step_num
 
-    # Final state + grade
+        log_step(step=step_num, action=act_type, reward=reward, done=done)
+
+        # Update persistent memory
+        if act_type not in ("inspect_logs", "inspect_metrics", "inspect_traces", "noop") and target:
+            new_slo = obs.get("global_slo_score", 0.0)
+            for svc in obs.get("services", []):
+                if svc["id"] == target and svc["status"] == "healthy":
+                    if target not in resolved_services:
+                        resolved_services.append(target)
+            entry = f"{target} (slo={new_slo:.0%})"
+            tried_actions.setdefault(act_type, [])
+            if entry not in tried_actions[act_type]:
+                tried_actions[act_type].append(entry)
+
+    # Grade the episode
     final_state = httpx.get(f"{base}/state", timeout=10.0).json()
     grade = httpx.post(
         f"{base}/grader",
@@ -304,55 +351,68 @@ def run_episode(
         timeout=10.0,
     ).json()
 
+    score = grade.get("score", 0.0)
+    outcome = final_state.get("termination_reason", "timeout")
+    success = outcome == "resolved"
+
+    log_end(task=task_id, success=success, steps=steps_taken, score=score, rewards=rewards)
+
     return {
         "task_id": task_id,
         "seed": seed,
-        "total_reward": total_reward,
-        "score": grade.get("score", 0.0),
+        "score": score,
         "slo_recovery": grade.get("slo_recovery", 0.0),
         "action_efficiency": grade.get("action_efficiency", 0.0),
         "time_efficiency": grade.get("time_efficiency", 0.0),
         "steps_taken": final_state.get("step_count", 0),
-        "termination_reason": final_state.get("termination_reason"),
+        "termination_reason": outcome,
+        "rewards": rewards,
     }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    env_url = os.getenv("ENV_URL", "http://localhost:7860")
 
-    tasks = ["easy", "medium", "hard"]
-    seeds = [42, 123, 7]
+    all_tasks = {"easy": 42, "medium": 123, "hard": 7}
+    task_filter = os.getenv("TASKS", "").strip()
+    selected = [t.strip() for t in task_filter.split(",")] if task_filter else list(all_tasks)
+    tasks = [(t, all_tasks[t]) for t in selected if t in all_tasks]
 
-    print("=" * 60)
-    print("SevZero Baseline Inference")
-    print("=" * 60)
-    print(f"Model:       {MODEL_NAME}")
-    print(f"API:         {API_BASE_URL}")
-    print(f"Environment: {env_url}")
-    print()
+    print("=" * 60, flush=True)
+    print("SevZero Baseline Inference", flush=True)
+    print("=" * 60, flush=True)
+    print(f"Model:       {MODEL_NAME}", flush=True)
+    print(f"API:         {API_BASE_URL}", flush=True)
+    print(f"Environment: {ENV_URL}", flush=True)
+    print(flush=True)
 
     results = []
-    for task_id, seed in zip(tasks, seeds):
-        print(f"--- Task: {task_id} (seed={seed}) ---")
-        result = run_episode(client, env_url, task_id, seed)
+    for task_id, seed in tasks:
+        print(f"--- Task: {task_id} (seed={seed}) ---", flush=True)
+        result = run_episode(client, task_id, seed)
         results.append(result)
         print(
             f"  Score: {result['score']:.4f} | SLO: {result['slo_recovery']:.4f} | "
             f"AE: {result['action_efficiency']:.4f} | TE: {result['time_efficiency']:.4f} | "
-            f"Steps: {result['steps_taken']} | Outcome: {result['termination_reason']}"
+            f"Steps: {result['steps_taken']} | Outcome: {result['termination_reason']}",
+            flush=True,
         )
-        print()
+        print(flush=True)
 
-    print("=" * 60)
-    print("Summary")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("Summary", flush=True)
+    print("=" * 60, flush=True)
     for r in results:
-        print(f"  {r['task_id']:8s} score={r['score']:.4f}  slo={r['slo_recovery']:.4f}  steps={r['steps_taken']}")
+        print(f"  {r['task_id']:8s} score={r['score']:.4f}  slo={r['slo_recovery']:.4f}  steps={r['steps_taken']}", flush=True)
     avg_score = sum(r["score"] for r in results) / len(results) if results else 0.0
-    print(f"\n  Average score: {avg_score:.4f}")
+    print(f"\n  Average score: {avg_score:.4f}", flush=True)
 
-    # Save results to outputs/
+    # Save results
     outputs_dir = Path(__file__).parent / "outputs"
     outputs_dir.mkdir(exist_ok=True)
     run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -364,10 +424,15 @@ def main() -> None:
         "results": results,
     }
     out_file = outputs_dir / f"baseline_{run_ts}.json"
-    latest_file = outputs_dir / "baseline_latest.json"
+    (outputs_dir / "baseline_latest.json").write_text(json.dumps(payload, indent=2))
     out_file.write_text(json.dumps(payload, indent=2))
-    latest_file.write_text(json.dumps(payload, indent=2))
-    print(f"\n  Results saved -> {out_file.name}")
+    print(f"\n  Results saved -> {out_file.name}", flush=True)
+
+    total = _token_usage["prompt"] + _token_usage["completion"]
+    print(f"\n  Token usage:", flush=True)
+    print(f"    prompt:     {_token_usage['prompt']:,}", flush=True)
+    print(f"    completion: {_token_usage['completion']:,}", flush=True)
+    print(f"    total:      {total:,}", flush=True)
 
 
 if __name__ == "__main__":

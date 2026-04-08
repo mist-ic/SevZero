@@ -38,8 +38,8 @@ class CircuitBreaker:
 
     # Config (tunable by agent via tune_config)
     error_threshold: float = 0.5      # Error rate to trip OPEN
-    cooldown_ticks: int = 5           # Ticks to stay OPEN before half-open
-    half_open_success_threshold: int = 3  # Successes needed to close
+    cooldown_ticks: int = 3           # Ticks to stay OPEN before half-open
+    half_open_success_threshold: int = 2  # Successes needed to close
 
     # Runtime state
     ticks_in_current_state: int = 0

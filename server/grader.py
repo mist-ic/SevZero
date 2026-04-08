@@ -82,8 +82,14 @@ def grade_episode(
         # Resolved: reward faster resolution
         time_efficiency = max(0.1, 1.0 - (steps_taken / max_steps))
     else:
-        # Not resolved: partial credit based on how close we got
-        time_efficiency = final_slo_score * 0.3
+        # Not resolved: combine SLO progress with how quickly it was reached.
+        # slo_factor: how much of the system was recovered
+        # speed_factor: steps remaining as a fraction of budget (rewards using fewer steps)
+        # 0.9 discount ensures a resolved episode always scores higher than a
+        # timed-out one under equivalent conditions.
+        slo_factor = final_slo_score
+        speed_factor = max(0.0, 1.0 - (steps_taken / max_steps))
+        time_efficiency = (slo_factor * 0.5 + speed_factor * 0.5) * 0.9
 
     # --- Final score ---
     score = (

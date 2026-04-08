@@ -59,12 +59,17 @@ _TEMPLATES: Dict[FailureType, List[str]] = {
     ],
 
     FailureType.CASCADING_LATENCY: [
-        "WARN  {service} Downstream {dependency} timeout after {timeout_ms}ms. Circuit breaker OPEN for {cooldown}s. {queued} requests queued.",
-        "WARN  {service} Thread pool exhaustion: {active}/{pool_size} threads active. Queue depth: {queue_depth}. Avg wait: {wait_ms}ms.",
-        "ERROR {service} gRPC deadline exceeded: remaining_ms={remaining_ms}. Upstream deadline propagated through {hop_count} hops.",
-        "WARN  {service} Connection pool to {dependency}: active={active}/{pool_size}, pending={pending}. Avg checkout time: {checkout_ms}ms (threshold: {threshold_ms}ms).",
-        "ERROR {service} Request timeout: {dependency} did not respond within {timeout_ms}ms. Retry {retry_count}/{retry_max}.",
-        "WARN  {service} p99 latency spike: {p99_ms}ms (baseline: {baseline_ms}ms). {dependency} response time degrading.",
+        "WARN  {service} Thread pool self-saturation: {active}/{pool_size} worker threads active. Queue depth: {queue_depth}. Avg wait: {wait_ms}ms. "
+        "This service is the bottleneck — scale or rebalance traffic away from this service.",
+        "WARN  {service} Worker thread exhaustion: arrival rate {throughput}rps exceeds processing capacity. "
+        "Active threads: {active}/{pool_size}. Queued: {queue_depth}. Fix: scale_service or rebalance_traffic.",
+        "ERROR {service} Request queue overflow: {queue_depth} requests waiting for worker threads ({active}/{pool_size} busy). "
+        "p99={p99_ms}ms. Root cause is this service's own capacity — restart to clear threads or scale to add capacity.",
+        "WARN  {service} Internal latency spiral: p99={p99_ms}ms (baseline: {baseline_ms}ms). Thread pool utilisation critical. "
+        "Retry amplification causing {throughput}rps effective load. This service needs to be restarted or scaled.",
+        "CRIT  {service} Capacity overload: {active}/{pool_size} threads saturated, {queue_depth} requests pending. "
+        "All downstream timeouts are a symptom of THIS service being overwhelmed. "
+        "Run: restart_service or scale_service on {service}.",
     ],
 
     FailureType.RESOURCE_LEAK: [
