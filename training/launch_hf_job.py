@@ -67,6 +67,8 @@ def main() -> None:
         "set -euo pipefail && "
         "(command -v git >/dev/null 2>&1 || (apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates)) && "
         f"git clone --depth 1 {git_url!r} /work/r && cd /work/r && "
+        # PIP_BREAK_SYSTEM_PACKAGES handles PEP 668 lockouts on Ubuntu 24.04+ images
+        "export PIP_BREAK_SYSTEM_PACKAGES=1 && "
         "pip install -U pip && "
         "pip install 'trl>=0.20' 'peft' 'transformers' 'accelerate' 'bitsandbytes' 'datasets' "
         "'huggingface_hub' 'httpx' 'python-dotenv' 'vllm' 'unsloth' 'trackio' && "
