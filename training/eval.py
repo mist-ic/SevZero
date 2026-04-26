@@ -27,7 +27,7 @@ DEFAULT_TASKS = ("easy", "medium", "hard")
 DATASET_HUB = "Mist-ic/sevzero-eval-results"
 
 BUILTIN: Dict[str, str] = {
-    "untrained-llama": "base:meta-llama/Llama-3.1-8B-Instruct",
+    "untrained-llama": "base:" + os.environ.get("SEVZERO_BASE_MODEL", "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"),
     "sft-primary": os.getenv("SFT_ADAPTER_PRIMARY", "PhaseOfCode/sevzero-llama3-8b-sft"),
     "sft-backup": os.getenv("SFT_ADAPTER_BACKUP", "NoahInOblivion/sevzero-llama3-8b-sft"),
     "sft-innovation": os.getenv("SFT_ADAPTER_INNOVATION", "NoxIsOblivion/sevzero-llama3-8b-sft"),
@@ -102,7 +102,7 @@ def load_llama_peft(adapter_id: str | None):
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-    base_id = "meta-llama/Llama-3.1-8B-Instruct"
+    base_id = os.environ.get("SEVZERO_BASE_MODEL", "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit")
     tok = AutoTokenizer.from_pretrained(base_id, use_fast=True, token=os.environ.get("HF_TOKEN"))
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token

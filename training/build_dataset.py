@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -37,7 +38,7 @@ def _get_tokenizer():
         from transformers import AutoTokenizer
     except Exception:
         return None
-    name = "meta-llama/Llama-3.1-8B-Instruct"
+    name = os.environ.get("SEVZERO_BASE_MODEL", "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit")
     try:
         tok = AutoTokenizer.from_pretrained(
             name, token=os.environ.get("HF_MAIN_TOKEN")

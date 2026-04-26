@@ -21,7 +21,12 @@ from training.config_utils import try_load_env_files
 try_load_env_files()
 
 # --- Pin guidance (orchestrator resolves exact pins): trl>=0.22, unsloth, bitsandbytes, peft, accelerate
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+# Use Unsloth's ungated mirror of Llama-3.1-8B-Instruct (same weights, 4-bit pre-quant) so worker
+# accounts don't need to be approved for meta-llama/* gated repos.
+BASE_MODEL = os.environ.get(
+    "SEVZERO_BASE_MODEL",
+    "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+)
 DATASET_ID = "Mist-ic/sevzero-expert-trajectories"
 DEFAULT_MAX_SEQ = 2048
 

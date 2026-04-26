@@ -22,7 +22,10 @@ from training.config_utils import try_load_env_files
 
 try_load_env_files()
 
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+BASE_MODEL = os.environ.get(
+    "SEVZERO_BASE_MODEL",
+    "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+)
 METRICS_NAME = "metrics.jsonl"
 
 # Pinned in README: trl, unsloth, vllm — orchestrator sets exact versions
