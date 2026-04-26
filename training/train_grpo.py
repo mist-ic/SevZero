@@ -178,7 +178,7 @@ def main() -> None:
         args.sft_adapter_repo,
         token=worker_token or None,
         is_trainable=True,
-        device="cpu",
+        torch_device="cpu",
     )
     if torch.cuda.is_available():
         model = model.to("cuda:0")
