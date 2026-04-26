@@ -105,6 +105,17 @@ def main() -> None:
     from peft import LoraConfig, get_peft_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+        _ = torch.zeros(1, device="cuda:0")
+        try:
+            bf16_ok = torch.cuda.is_bf16_supported()
+        except Exception:
+            bf16_ok = False
+        print(f"[sft] cuda={torch.cuda.is_available()} dev={torch.cuda.current_device()} bf16_ok={bf16_ok} cap={torch.cuda.get_device_capability(0)}", flush=True)
+    else:
+        bf16_ok = False
+
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -171,7 +182,8 @@ def main() -> None:
         warmup_ratio=0.05,
         lr_scheduler_type="cosine",
         optim="paged_adamw_8bit" if USE_4BIT else "adamw_torch",
-        bf16=True,
+        bf16=bool(bf16_ok),
+        fp16=not bool(bf16_ok),
         seed=args.seed,
         logging_steps=1,
         report_to=report_backends,
