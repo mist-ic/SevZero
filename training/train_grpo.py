@@ -24,7 +24,7 @@ try_load_env_files()
 
 BASE_MODEL = os.environ.get(
     "SEVZERO_BASE_MODEL",
-    "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+    "unsloth/Meta-Llama-3.1-8B-Instruct",
 )
 METRICS_NAME = "metrics.jsonl"
 
