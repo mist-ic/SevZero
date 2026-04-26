@@ -119,11 +119,14 @@ def main() -> None:
     try:
         import trackio
 
-        trackio.init(
-            project="sevzero-grpo",
-            space_id="Mist-ic/sevzero-trackio",
-            **({"hf_token": main_token} if main_token else {}),
-        )
+        kwargs: dict = {"project": "sevzero-grpo", "space_id": "Mist-ic/sevzero-trackio"}
+        if main_token:
+            try:
+                trackio.init(**kwargs, token=main_token)
+            except TypeError:
+                trackio.init(**kwargs)
+        else:
+            trackio.init(**kwargs)
     except Exception as e:
         print(f"trackio init skipped: {e}", flush=True)
 
