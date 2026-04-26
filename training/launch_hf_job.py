@@ -65,20 +65,20 @@ def main() -> None:
     extra = " ".join(rest)
     if a.script == "grpo":
         # April 2026 pin compatible with our rollout_func + trl.experimental.openenv API.
-        #   - trl==1.2.0 (released 2026-04-17): rollout_func + generate_rollout_completions added in 1.0.0 (PR #5122).
-        #   - vllm==0.18.0: TRL 1.2.0 declares vLLM support up to 0.18.0 (PR #5547).
-        #   - transformers==5.5.3: matched by vllm 0.19.1 changelog.
-        #   - Image: pytorch:2.10.0-cuda12.8-cudnn9-runtime (vllm 0.18 needs torch 2.10).
+        #   - trl==1.2.0 (2026-04-17): rollout_func + generate_rollout_completions came in TRL 1.0.0 (PR #5122).
+        #   - vllm==0.18.0: TRL 1.2.0 caps vLLM at 0.18.0 (PR #5547); 0.18.0 requires transformers<5.
+        #   - transformers==4.57.0: in the intersection of trl>=4.56.2 and vllm<5,>=4.56.0.
+        #   - Image: pytorch:2.10.0-cuda12.8-cudnn9-runtime (vllm 0.18 ships against torch 2.10).
         # Ubuntu 24.04 needs PIP_BREAK_SYSTEM_PACKAGES; no unsloth.
         deps = (
-            "pip install 'trl==1.2.0' 'peft' 'transformers==5.5.3' "
+            "pip install 'trl==1.2.0' 'peft' 'transformers==4.57.0' "
             "'accelerate' 'bitsandbytes' 'datasets' 'huggingface_hub' 'httpx' 'python-dotenv' "
             "'vllm==0.18.0' 'trackio'"
         )
     else:
         # SFT also uses plain transformers + PEFT (no Unsloth import path).
         deps = (
-            "pip install 'trl==1.2.0' 'peft' 'transformers==5.5.3' "
+            "pip install 'trl==1.2.0' 'peft' 'transformers==4.57.0' "
             "'accelerate' 'bitsandbytes' 'datasets' 'huggingface_hub' 'httpx' 'python-dotenv' "
             "'trackio'"
         )
