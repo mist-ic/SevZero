@@ -252,7 +252,7 @@ def main() -> None:
                             "action_type": str(action.get("action_type", "noop")),
                             "params": action.get("params") or {},
                         }
-                        sr = await client.step({"action": step_payload})
+                        sr = await client.step(step_payload)
                         obs = sr.get("observation", sr)
                         done = sr.get("done", False)
                         r = float(obs.get("reward", sr.get("reward", 0.0) or 0.0))
