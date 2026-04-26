@@ -121,7 +121,7 @@ class LegalAction(BaseModel):
         description=(
             "One of: inspect_logs | inspect_metrics | inspect_traces | "
             "restart_service | rollback_service | scale_service | tune_config | "
-            "clear_cache | rebalance_traffic | pause_job | noop"
+            "clear_cache | rebalance_traffic | pause_job | request_approval | noop"
         )
     )
     valid_targets: List[str] = Field(
@@ -150,6 +150,7 @@ class SevZeroAction(Action):
       clear_cache(cache_name)          -> flushes cache; 1 tick delay
       rebalance_traffic(from_region, to_region, pct)  -> shifts traffic; 2-3 tick delay
       pause_job(job_name)              -> pauses background job; 1 tick delay
+      request_approval(action_type, target, reason) -> asks manager for gating (oversight)
       noop()                           -> wait and observe; 0 ticks
     """
 
@@ -221,6 +222,21 @@ class SevZeroObservation(Observation):
             "See ServiceInfoModel for field definitions."
         ),
     )
+    cluster: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "When schema drift renames the envelope, the service list may appear "
+            "under cluster.services; otherwise null."
+        ),
+    )
+    schema_version: str = Field(
+        default="v1",
+        description="Observation schema tag; drift episodes use v1.2-drift when enabled.",
+    )
+    schema_changelog: List[str] = Field(
+        default_factory=list,
+        description="Plain-English list of active schema drift mutations, if any.",
+    )
 
     # --- Active alerts ---
     alerts: List[Dict[str, Any]] = Field(
@@ -259,6 +275,14 @@ class SevZeroObservation(Observation):
     traces: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Distributed trace from the most recent inspect_traces action.",
+    )
+    oversight_policy: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="High-impact rules when oversight is enabled (read-only for the agent).",
+    )
+    pending_approvals: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="In-flight or recent approval requests when oversight is enabled.",
     )
 
 

@@ -96,10 +96,18 @@ class FailureSpec:
 def select_failure_type(
     rng: random.Random,
     exclude: Optional[List[FailureType]] = None,
+    weight_override: Optional[Dict[FailureType, float]] = None,
 ) -> FailureType:
     """Sample a failure type from the empirically-weighted distribution."""
-    population = list(_FAILURE_WEIGHTS.keys())
-    weights = [_FAILURE_WEIGHTS[f] for f in population]
+    if weight_override:
+        base: Dict[FailureType, float] = {
+            f: weight_override.get(f, _FAILURE_WEIGHTS.get(f, 0.0))
+            for f in _FAILURE_WEIGHTS
+        }
+    else:
+        base = dict(_FAILURE_WEIGHTS)
+    population = list(base.keys())
+    weights = [max(1e-9, base[f]) for f in population]
 
     # Remove excluded types
     if exclude:
@@ -112,7 +120,8 @@ def select_failure_type(
 
 
 def select_multi_root_failures(
-    rng: random.Random, count: int = 2
+    rng: random.Random, count: int = 2,
+    weight_override: Optional[Dict[FailureType, float]] = None,
 ) -> List[FailureType]:
     """Select multiple failure types with incompatibility constraints."""
     selected: List[FailureType] = []
@@ -125,7 +134,9 @@ def select_multi_root_failures(
                     exclude.append(b)
                 elif s == b:
                     exclude.append(a)
-        ft = select_failure_type(rng, exclude=exclude)
+        ft = select_failure_type(
+            rng, exclude=exclude, weight_override=weight_override,
+        )
         selected.append(ft)
     return selected
 

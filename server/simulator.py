@@ -79,6 +79,7 @@ class Simulator:
         obs_data = sim.reset(seed=42, difficulty="easy")
         obs_data = sim.step(action_type="inspect_logs", params={"service_id": "order-service"})
     """
+    reward_shaping: str = "dense_v1"
 
     # --- Graph and topology ---
     graph: Optional[ServiceGraph] = None
@@ -120,11 +121,17 @@ class Simulator:
     # --- Remediation tracking ---
     remediated_services: Dict[str, int] = field(default_factory=dict)  # service_id → tick remediated
 
+    # --- Reward shaping (dense_v2) ---
+    _diagnosis_inspect_once: set = field(default_factory=set)  # service_ids already given bonus
+    _alerts_count_prev_end: int = 0
+    _last_action_fingerprint: Optional[Tuple[str, Optional[str]]] = None
+
     def reset(
         self,
         seed: int,
         difficulty: str,
         failure_specs: Optional[List[FailureSpec]] = None,
+        max_steps_override: Optional[int] = None,
     ) -> None:
         """Initialize a new episode. Call get_observation() after this."""
         self.rng = random.Random(seed)
@@ -140,10 +147,14 @@ class Simulator:
         self.last_traces = None
         self.metric_history = {}
         self.remediated_services = {}
+        self._diagnosis_inspect_once = set()
+        self._last_action_fingerprint = None
 
         # Step budgets
         budgets = {"easy": 10, "medium": 20, "hard": 50}
         self.max_steps = budgets.get(difficulty, 10)
+        if max_steps_override is not None and max_steps_override > 0:
+            self.max_steps = int(max_steps_override)
 
         # Generate graph
         self.graph = generate_graph(difficulty, self.rng)
@@ -193,8 +204,16 @@ class Simulator:
         self._evolve_failures()
         self._run_propagation()
         self._record_metrics()
+        self._alerts_count_prev_end = len(self.get_alerts())
 
-    def step(self, action_type: str, params: Dict[str, Any]) -> float:
+    def step(
+        self,
+        action_type: str,
+        params: Dict[str, Any],
+        *,
+        prebuilt_record: Optional[Dict[str, Any]] = None,
+        fixed_reward: Optional[float] = None,
+    ) -> float:
         """
         Execute one agent action and advance the simulation by one tick.
         Returns the step reward (dense Δ-SLO shaping).
@@ -202,7 +221,12 @@ class Simulator:
         if self.terminated:
             return 0.0
 
+        a_start = len(self.get_alerts())
         prev_slo = self.get_slo_score()
+        pre_action = (action_type, self._fingerprint_target(action_type, params))
+        critical_before = any(
+            a.get("severity") == "critical" for a in self.get_alerts()
+        )
 
         # Clear diagnostic output from previous step
         self.last_logs = None
@@ -210,7 +234,10 @@ class Simulator:
         self.last_traces = None
 
         # Process the action
-        action_record = self._process_action(action_type, params)
+        if prebuilt_record is not None:
+            action_record = {**prebuilt_record, "tick": self.tick}
+        else:
+            action_record = self._process_action(action_type, params)
         self.actions_taken.append(action_record)
 
         # Advance tick
@@ -234,7 +261,19 @@ class Simulator:
 
         # Compute reward
         new_slo = self.get_slo_score()
-        reward = self._compute_reward(prev_slo, new_slo, action_type, action_record)
+        n_alerts_end = len(self.get_alerts())
+        if fixed_reward is not None:
+            reward = float(fixed_reward)
+        else:
+            reward = self._compute_reward(
+                prev_slo, new_slo, action_type, action_record,
+                pre_action_fingerprint=pre_action,
+                critical_at_noop_start=critical_before,
+                alerts_at_start=a_start,
+                alerts_at_end=n_alerts_end,
+            )
+        self._alerts_count_prev_end = n_alerts_end
+        self._last_action_fingerprint = pre_action
 
         # Check termination
         self._check_termination()
@@ -245,13 +284,40 @@ class Simulator:
     # Action processing
     # -------------------------------------------------------------------
 
+    def action_fingerprint(
+        self, action_type: str, params: Dict[str, Any],
+    ) -> Optional[str]:
+        """Public alias for action (type, target) identity for repetition / logging."""
+        return self._fingerprint_target(action_type, params)
+
+    def _fingerprint_target(
+        self, action_type: str, params: Dict[str, Any],
+    ) -> Optional[str]:
+        if action_type in ("noop",):
+            return None
+        if action_type == "rebalance_traffic":
+            fr = str(
+                params.get("from_region")
+                or params.get("region")
+                or params.get("service_id", "")
+            )
+            to = str(params.get("to_region", "") or params.get("target", ""))
+            return f"{fr}->{to}"
+        if action_type == "request_approval":
+            return (
+                f"{params.get('action_type', '')!s}|{params.get('target', '')!s}"
+            )
+        for k in ("service_id", "cache_name", "job_name"):
+            if k in params and params[k] is not None and params[k] != "":
+                return str(params[k])
+        return None
+
     def _process_action(self, action_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Process an agent action. Returns an action record dict."""
-        service_id = params.get("service_id")
         record = {
             "tick": self.tick,
             "action": action_type,
-            "target": service_id,
+            "target": self._fingerprint_target(action_type, params),
             "success": False,
             "note": None,
         }
@@ -259,6 +325,11 @@ class Simulator:
         if action_type == "noop":
             record["success"] = True
             record["note"] = "Waited and observed"
+            return record
+
+        if action_type == "request_approval":
+            record["success"] = True
+            record["note"] = "Approval request recorded (manager will respond next tick)"
             return record
 
         if action_type == "inspect_logs":
@@ -761,8 +832,16 @@ class Simulator:
     # -------------------------------------------------------------------
 
     def _compute_reward(
-        self, prev_slo: float, new_slo: float,
-        action_type: str, record: Dict,
+        self,
+        prev_slo: float,
+        new_slo: float,
+        action_type: str,
+        record: Dict,
+        *,
+        pre_action_fingerprint: Tuple[Optional[str], Optional[str]],
+        critical_at_noop_start: bool,
+        alerts_at_start: int,
+        alerts_at_end: int,
     ) -> float:
         """Dense Δ-SLO reward with action-type penalties."""
         # Base: delta SLO (positive = improvement)
@@ -778,12 +857,34 @@ class Simulator:
             reward -= 0.5
 
         # Small penalty for non-diagnostic actions (encourage efficiency)
-        if action_type not in ("inspect_logs", "inspect_metrics", "inspect_traces", "noop"):
+        if action_type not in (
+            "inspect_logs",
+            "inspect_metrics",
+            "inspect_traces",
+            "noop",
+            "request_approval",
+        ):
             reward -= 0.1  # Small cost for remediation actions
 
         # Penalty for redundant noops when system is degraded
         if action_type == "noop" and new_slo < 0.9:
             reward -= 0.2
+
+        if self.reward_shaping == "dense_v2":
+            if (
+                action_type == "inspect_logs"
+                and record.get("success")
+            ):
+                sid = record.get("target")
+                if sid and self._get_failure_for_service(sid) and sid not in self._diagnosis_inspect_once:
+                    self._diagnosis_inspect_once.add(sid)
+                    reward += 0.05
+            if alerts_at_end < alerts_at_start:
+                reward += 0.05
+            if self._last_action_fingerprint is not None and self._last_action_fingerprint == pre_action_fingerprint:
+                reward -= 0.02
+            if action_type == "noop" and critical_at_noop_start:
+                reward -= 0.02
 
         return round(reward, 4)
 
@@ -931,7 +1032,9 @@ class Simulator:
         alerts.sort(key=lambda a: severity_order.get(a["severity"], 9))
         return alerts
 
-    def get_legal_actions(self) -> List[Dict[str, Any]]:
+    def get_legal_actions(
+        self, include_request_approval: bool = False,
+    ) -> List[Dict[str, Any]]:
         """Return the set of currently legal actions with valid targets."""
         service_ids = list(self.services.keys())
         actions = [
@@ -967,6 +1070,12 @@ class Simulator:
         # Pause job: only background job services
         if self.graph and self.graph.background_jobs:
             actions.append({"action_type": "pause_job", "valid_targets": self.graph.background_jobs})
+
+        if include_request_approval:
+            actions.append({
+                "action_type": "request_approval",
+                "valid_targets": service_ids,
+            })
 
         return actions
 
