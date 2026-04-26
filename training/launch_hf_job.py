@@ -69,7 +69,7 @@ def main() -> None:
         f"git clone --depth 1 {git_url!r} /work/r && cd /work/r && "
         "pip install -U pip && "
         "pip install 'trl>=0.20' 'peft' 'transformers' 'accelerate' 'bitsandbytes' 'datasets' "
-        "'huggingface_hub' 'httpx' 'python-dotenv' 'vllm' 'unsloth' && "
+        "'huggingface_hub' 'httpx' 'python-dotenv' 'vllm' 'unsloth' 'trackio' && "
         f"python {which} --variant_name {a.variant_name!r} {extra}"
     )
     from huggingface_hub import run_job

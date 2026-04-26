@@ -182,6 +182,12 @@ def main() -> None:
             )
         else:
             raise ValueError("Dataset must include a 'text' or 'messages' column")
+    report_backends = ["trackio"]
+    try:
+        import trackio  # noqa: F401
+    except ImportError:
+        report_backends = ["none"]
+
     targs = SFTConfig(
         output_dir=args.output_dir,
         max_steps=args.max_steps,
@@ -194,9 +200,9 @@ def main() -> None:
         bf16=True,
         seed=args.seed,
         logging_steps=1,
-        report_to="trackio",
+        report_to=report_backends,
         save_total_limit=2,
-        max_seq_length=max_seq,
+        max_length=max_seq,  # TRL >=0.21 renamed max_seq_length -> max_length
     )
 
     from transformers import TrainerCallback
@@ -218,7 +224,6 @@ def main() -> None:
         processing_class=tokenizer,
         args=targs,
         train_dataset=ds,
-        dataset_text_field="text",
         callbacks=[JsonStepLog()],
     )
     trainer.train()
