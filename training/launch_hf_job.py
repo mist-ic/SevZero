@@ -64,9 +64,12 @@ def main() -> None:
     which = f"training/train_{a.script}.py"
     extra = " ".join(rest)
     inner = (
-        f"set -euo pipefail && git clone --depth 1 {git_url!r} /work/r && cd /work/r && "
-        "pip install -U pip 'trl>=0.20' 'peft' 'transformers' 'accelerate' 'bitsandbytes' 'datasets' "
-        "'huggingface_hub' 'httpx' 'python-dotenv' 'vllm' 'unsloth' 2>/dev/null || true && "
+        "set -euo pipefail && "
+        "(command -v git >/dev/null 2>&1 || (apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates)) && "
+        f"git clone --depth 1 {git_url!r} /work/r && cd /work/r && "
+        "pip install -U pip && "
+        "pip install 'trl>=0.20' 'peft' 'transformers' 'accelerate' 'bitsandbytes' 'datasets' "
+        "'huggingface_hub' 'httpx' 'python-dotenv' 'vllm' 'unsloth' && "
         f"python {which} --variant_name {a.variant_name!r} {extra}"
     )
     from huggingface_hub import run_job

@@ -1,3 +1,15 @@
+---
+title: SevZero Env
+emoji: 🛟
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: SRE incident-response environment for OpenEnv (R2)
+---
+
 # SevZero
 
 **A self-evolving SRE war-room for training on-call AI agents.**
