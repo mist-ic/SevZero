@@ -156,14 +156,32 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # Load on CPU first; PEFT adapter weight loading via safetensors with
+    # device='cuda:0' has triggered CUDA init err 802 on the H200 container even
+    # after a successful warmup probe. Loading on CPU and explicitly moving
+    # to GPU at the end avoids the safetensors->torch lazy_init path entirely.
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL,
         torch_dtype=torch.bfloat16,
-        device_map="auto",
+        device_map="cpu",
         token=worker_token or None,
+        low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
-    model = PeftModel.from_pretrained(model, args.sft_adapter_repo, token=worker_token or None, is_trainable=True)
+    model = PeftModel.from_pretrained(
+        model,
+        args.sft_adapter_repo,
+        token=worker_token or None,
+        is_trainable=True,
+    )
+    if torch.cuda.is_available():
+        model = model.to("cuda:0")
+        torch.cuda.synchronize()
+        print(
+            f"[grpo] model on cuda:0 dtype={next(model.parameters()).dtype} "
+            f"mem_alloc={torch.cuda.memory_allocated()/1e9:.1f}GB",
+            flush=True,
+        )
     # Optional env flags (future env upgrades) — no-op for baseline server
     if args.enable_schema_drift:
         os.environ["SEVZERO_SCHEMA_DRIFT"] = "1"

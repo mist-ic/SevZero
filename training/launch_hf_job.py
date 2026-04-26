@@ -36,7 +36,7 @@ def _default_git_url() -> str:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--account_token", type=str, default=os.environ.get("HF_TOKEN", ""))
-    p.add_argument("--script", type=str, choices=("sft", "grpo"), required=True)
+    p.add_argument("--script", type=str, choices=("sft", "grpo", "eval"), required=True)
     p.add_argument("--variant_name", type=str, default="run")
     p.add_argument("--hardware", type=str, default="l40sx1")
     p.add_argument(
@@ -61,8 +61,12 @@ def main() -> None:
     if "SEVZERO_ENV_URL" not in ev and os.environ.get("SEVZERO_ENV_URL"):
         ev["SEVZERO_ENV_URL"] = os.environ["SEVZERO_ENV_URL"]
 
-    which = f"training/train_{a.script}.py"
+    if a.script == "eval":
+        which = "training/eval.py"
+    else:
+        which = f"training/train_{a.script}.py"
     extra = " ".join(rest)
+    variant_flag = "" if a.script == "eval" else f"--variant_name {a.variant_name!r} "
     if a.script == "grpo":
         # April 2026 pin compatible with our rollout_func + trl.experimental.openenv API.
         #   - trl==1.2.0 (2026-04-17): rollout_func + generate_rollout_completions came in TRL 1.0.0 (PR #5122).
@@ -74,6 +78,13 @@ def main() -> None:
             "pip install 'trl==1.2.0' 'peft' 'transformers==4.57.0' "
             "'accelerate' 'bitsandbytes' 'datasets' 'huggingface_hub' 'httpx' 'python-dotenv' "
             "'vllm==0.18.0' 'trackio'"
+        )
+    elif a.script == "eval":
+        # Eval = inference only: no trl/vllm/trackio needed; bnb only if 4-bit fallback.
+        deps = (
+            "pip install 'peft' 'transformers==4.57.0' 'accelerate' 'bitsandbytes' "
+            "'datasets' 'huggingface_hub' 'httpx' 'python-dotenv' 'google-genai' "
+            "'openai' 'azure-ai-inference'"
         )
     else:
         # SFT also uses plain transformers + PEFT (no Unsloth import path).
@@ -89,7 +100,7 @@ def main() -> None:
         "export PIP_BREAK_SYSTEM_PACKAGES=1 && "
         "pip install -U pip && "
         f"{deps} && "
-        f"python {which} --variant_name {a.variant_name!r} {extra}"
+        f"python {which} {variant_flag}{extra}"
     )
     from huggingface_hub import run_job
 
