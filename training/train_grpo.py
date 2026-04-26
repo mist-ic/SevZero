@@ -96,7 +96,7 @@ def _build_default_dataset():
             "You are the on-call SRE. Restore service health. "
             f"Incident session {i} — triage, diagnose root cause, remediate, verify."
         )
-        rows.append({"text": text, "row_id": i})
+        rows.append({"prompt": text, "row_id": i})
     return Dataset.from_list(rows)
 
 
