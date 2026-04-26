@@ -130,17 +130,17 @@ def main() -> None:
     except Exception as e:
         print(f"trackio init skipped: {e}", flush=True)
 
-    try:
-        from unsloth import FastLanguageModel, PatchFastRL
-    except ImportError as e:
-        raise SystemExit(
-            f"unsloth is required for GRPO on this path: {e}\n"
-            "Install training extras, or on unsupported platforms set UNSLOTH_DISABLE=1 and extend train_grpo."
-        ) from e
+    import torch
 
-    PatchFastRL(algorithm="grpo", FastLanguageModel=FastLanguageModel)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+        _ = torch.zeros(1, device="cuda:0")
+        print(f"[grpo] cuda OK dev={torch.cuda.current_device()} cap={torch.cuda.get_device_capability(0)}", flush=True)
+    else:
+        print("[grpo] WARNING: no CUDA detected; this will fail soon", flush=True)
 
     from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import GRPOConfig, GRPOTrainer
     from trl.experimental.openenv import generate_rollout_completions
 
@@ -152,13 +152,18 @@ def main() -> None:
     )
 
     max_seq = 4096
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=BASE_MODEL,
-        max_seq_length=max_seq,
-        dtype=None,
-        load_in_4bit=True,
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True, token=worker_token or None)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        token=worker_token or None,
     )
-    model = PeftModel.from_pretrained(model, args.sft_adapter_repo, token=worker_token or None)
+    model.config.use_cache = False
+    model = PeftModel.from_pretrained(model, args.sft_adapter_repo, token=worker_token or None, is_trainable=True)
     # Optional env flags (future env upgrades) — no-op for baseline server
     if args.enable_schema_drift:
         os.environ["SEVZERO_SCHEMA_DRIFT"] = "1"

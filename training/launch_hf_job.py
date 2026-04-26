@@ -42,7 +42,7 @@ def main() -> None:
     p.add_argument(
         "--image",
         type=str,
-        default="pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime",
+        default="pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime",
     )
     p.add_argument("--git-url", type=str, default="")
     p.add_argument(
@@ -63,15 +63,32 @@ def main() -> None:
 
     which = f"training/train_{a.script}.py"
     extra = " ".join(rest)
+    if a.script == "grpo":
+        # April 2026 pin compatible with our rollout_func + trl.experimental.openenv API.
+        #   - trl==1.2.0 (released 2026-04-17): rollout_func + generate_rollout_completions added in 1.0.0 (PR #5122).
+        #   - vllm==0.18.0: TRL 1.2.0 declares vLLM support up to 0.18.0 (PR #5547).
+        #   - transformers==5.5.3: matched by vllm 0.19.1 changelog.
+        #   - Image: pytorch:2.10.0-cuda12.8-cudnn9-runtime (vllm 0.18 needs torch 2.10).
+        # Ubuntu 24.04 needs PIP_BREAK_SYSTEM_PACKAGES; no unsloth.
+        deps = (
+            "pip install 'trl==1.2.0' 'peft' 'transformers==5.5.3' "
+            "'accelerate' 'bitsandbytes' 'datasets' 'huggingface_hub' 'httpx' 'python-dotenv' "
+            "'vllm==0.18.0' 'trackio'"
+        )
+    else:
+        # SFT also uses plain transformers + PEFT (no Unsloth import path).
+        deps = (
+            "pip install 'trl==1.2.0' 'peft' 'transformers==5.5.3' "
+            "'accelerate' 'bitsandbytes' 'datasets' 'huggingface_hub' 'httpx' 'python-dotenv' "
+            "'trackio'"
+        )
     inner = (
         "set -euo pipefail && "
         "(command -v git >/dev/null 2>&1 || (apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates)) && "
         f"git clone --depth 1 {git_url!r} /work/r && cd /work/r && "
-        # PIP_BREAK_SYSTEM_PACKAGES handles PEP 668 lockouts on Ubuntu 24.04+ images
         "export PIP_BREAK_SYSTEM_PACKAGES=1 && "
         "pip install -U pip && "
-        "pip install 'trl>=0.20' 'peft' 'transformers' 'accelerate' 'bitsandbytes' 'datasets' "
-        "'huggingface_hub' 'httpx' 'python-dotenv' 'vllm' 'unsloth' 'trackio' && "
+        f"{deps} && "
         f"python {which} --variant_name {a.variant_name!r} {extra}"
     )
     from huggingface_hub import run_job
