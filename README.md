@@ -16,6 +16,8 @@ short_description: SRE incident-response environment for OpenEnv (R2)
 
 > At step fourteen, an untrained 8B model panicked and restarted the primary database, turning a minor latency spike into a regional outage. 300 steps later, it learned to throttle background jobs instead. This is SevZero.
 
+**Status:** Environment, SFT, and GRPO training all complete and public. Held-out evaluation on seeds 13/99/777: SFT and GRPO are statistically flat vs the untrained baseline — see the [blog post](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md) for the honest read and the full breakdown in [`Mist-ic/sevzero-eval-results`](https://huggingface.co/datasets/Mist-ic/sevzero-eval-results).
+
 In R1 we built the foundation; in R2 we turned it into a self-evolving SRE war-room: live curriculum pressure, schema drift, oversight for risky actions, and a training stack that shows up in reward curves, not just pull requests.
 
 ---
@@ -24,12 +26,18 @@ In R1 we built the foundation; in R2 we turned it into a self-evolving SRE war-r
 
 | | |
 |:--|:--|
-| **HF Space (environment)** | [`huggingface.co/spaces/mist-ic/sevzero-env`](https://huggingface.co/spaces/mist-ic/sevzero-env) |
-| **HF Space (Trackio / metrics)** | [`huggingface.co/spaces/mist-ic/sevzero-trackio`](https://huggingface.co/spaces/mist-ic/sevzero-trackio) |
-| **HF Model (8B GRPO adapter)** | [`huggingface.co/mist-ic/sevzero-llama3-8b-grpo`](https://huggingface.co/mist-ic/sevzero-llama3-8b-grpo) |
-| **HF Dataset (SFT / trajectories)** | [`huggingface.co/datasets/mist-ic/sevzero-expert-trajectories`](https://huggingface.co/datasets/mist-ic/sevzero-expert-trajectories) |
-| **Blog (HF)** | `__BLOG_URL__` |
-| **Video** | `__VIDEO_URL__` |
+| **GitHub** | [`github.com/mist-ic/SevZero`](https://github.com/mist-ic/SevZero) |
+| **HF Space (environment)** | [`huggingface.co/spaces/Mist-ic/sevzero-env`](https://huggingface.co/spaces/Mist-ic/sevzero-env) |
+| **HF Model (SFT-primary adapter)** | [`huggingface.co/PhaseOfCode/sevzero-llama3-8b-sft-primary`](https://huggingface.co/PhaseOfCode/sevzero-llama3-8b-sft-primary) |
+| **HF Model (SFT-stability adapter)** | [`huggingface.co/NovaInOblivion/sevzero-llama3-8b-sft-stability`](https://huggingface.co/NovaInOblivion/sevzero-llama3-8b-sft-stability) |
+| **HF Model (GRPO-primary adapter, lr 7e-6)** | [`huggingface.co/PhaseOfCode/sevzero-llama3-8b-grpo-primary`](https://huggingface.co/PhaseOfCode/sevzero-llama3-8b-grpo-primary) |
+| **HF Model (GRPO-stability adapter, lr 4e-6)** | [`huggingface.co/NovaInOblivion/sevzero-llama3-8b-grpo-stability`](https://huggingface.co/NovaInOblivion/sevzero-llama3-8b-grpo-stability) |
+| **HF Model (final mirrored GRPO)** | [`huggingface.co/Mist-ic/sevzero-llama3-8b-grpo`](https://huggingface.co/Mist-ic/sevzero-llama3-8b-grpo) |
+| **HF Dataset (trajectories)** | [`huggingface.co/datasets/Mist-ic/sevzero-expert-trajectories`](https://huggingface.co/datasets/Mist-ic/sevzero-expert-trajectories) |
+| **HF Dataset (eval results)** | [`huggingface.co/datasets/Mist-ic/sevzero-eval-results`](https://huggingface.co/datasets/Mist-ic/sevzero-eval-results) |
+| **Trackio (primary run)** | [`huggingface.co/spaces/PhaseOfCode/trackio`](https://huggingface.co/spaces/PhaseOfCode/trackio) |
+| **Trackio (stability run)** | [`huggingface.co/spaces/NovaInOblivion/trackio`](https://huggingface.co/spaces/NovaInOblivion/trackio) |
+| **Blog (HF)** | [`huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md`](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md) |
 
 ---
 
@@ -75,7 +83,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  T[Collect expert trajectories\nGemini / Claude / GPT] --> F[SFT\nLlama-3.1-8B-Instruct + LoRA]
+  T[Collect expert trajectories\nGrok-4.20-reasoning + Kimi-k2.6\nvia Azure AI Foundry] --> F[SFT\nLlama-3.1-8B-Instruct + LoRA]
   F --> G[GRPO\nremote SevZero / TRL + vLLM]
   G --> M[Model + eval on held-out seeds]
 ```
@@ -86,19 +94,21 @@ flowchart LR
 
 ## Results
 
-**Scores** (held-out eval seeds: **13, 99, 777** — not 42/123/7 from baseline). Replace `__FILL__` when eval lands.
+**Scores** (held-out eval seeds: **13, 99, 777** — not 42/123/7 from baseline).
 
-| Task | Baseline 8B | SFT | GRPO | Frontier (Gemini-3.1-Pro) |
-|------|------------|-----|------|----------------------------|
-| Easy | `__FILL__` | `__FILL__` | `__FILL__` | 0.930 |
-| Medium | `__FILL__` | `__FILL__` | `__FILL__` | 0.970 |
-| Hard | `__FILL__` | `__FILL__` | `__FILL__` | 0.887 |
-| **Mean** | `__FILL__` | `__FILL__` | `__FILL__` | **0.929** |
+| Task | Baseline 8B | SFT-primary | GRPO-primary | Frontier (Gemini-3.1-Pro) |
+|------|------------|-------------|--------------|----------------------------|
+| Easy | 0.8199 | 0.8199 | 0.8199 | 0.930 |
+| Medium | 0.9419 | 0.9419 | 0.9419 | 0.970 |
+| Hard | 0.6369 | 0.6269 | 0.6369 | 0.887 |
+| **Mean** | 0.7996 | 0.7962 | 0.7996 | **0.929** |
+
+SFT and 120-step GRPO produced flat lift on the held-out seeds. The environment, training loop, and eval harness are the contribution; moving the held-out scores requires more GRPO steps and denser reward shaping, which we discuss in the [blog post](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md).
 
 **Reward curve (GRPO)** — regenerate after each run:
 
 ```text
-python assets/reward_curve.py <path_to_metrics.jsonl> [--baseline __FILL__]
+python assets/reward_curve.py <path_to_metrics.jsonl> [--baseline 0.7996]
 ```
 
 ![GRPO reward vs step](assets/reward_curve.png)
@@ -120,7 +130,7 @@ python assets/scores_bar.py path/to/eval_results.csv
 | Criterion (weight) | How SevZero satisfies it |
 |--------------------|--------------------------|
 | Environment innovation (40%) | SRE sim + queueing cascades; R2: drift, oversight, curriculum, sub-reward density. |
-| Storytelling (30%) | Autopsy hook, blog, short video, README, annotated plots. |
+| Storytelling (30%) | Autopsy hook, HF blog, README, annotated plots. |
 | Reward improvement (20%) | Logged GRPO `metrics.jsonl`, curve + bar + before/after traces. |
 | Pipeline (10%) | SFT to GRPO, TRL `rollout_func`, scripts linked below. |
 | *Themes* | World modeling (professional): multi-signal state; long-horizon: Hard tier; self-improvement: curriculum; multi-agent: oversight layer. |
@@ -181,4 +191,4 @@ python assets/scores_bar.py training/outputs/eval_results.csv
 
 ---
 
-*Frontier ceiling (Gemini-3.1-Pro, 28-run aggregate): 0.929. Untrained 8B baseline for plots: `__FILL__` (see `metrics.jsonl` + zero-shot eval).*
+*Frontier ceiling (Gemini-3.1-Pro, 28-run aggregate): **0.929**. Untrained 8B floor (round-1 mean over seeds 13, 99, 777): **0.800** (exact mean **0.7996**; see `metrics.jsonl` + zero-shot eval).*
