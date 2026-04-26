@@ -25,10 +25,11 @@ try_load_env_files()
 # accounts don't need to be approved for meta-llama/* gated repos.
 BASE_MODEL = os.environ.get(
     "SEVZERO_BASE_MODEL",
-    "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+    "unsloth/Meta-Llama-3.1-8B-Instruct",
 )
+USE_4BIT = os.environ.get("SEVZERO_USE_4BIT", "0").lower() in ("1", "true", "yes")
 DATASET_ID = "Mist-ic/sevzero-expert-trajectories"
-DEFAULT_MAX_SEQ = 2048
+DEFAULT_MAX_SEQ = 1024
 
 
 def _parse_args() -> argparse.Namespace:
@@ -100,68 +101,41 @@ def main() -> None:
 
     ds = load_dataset(DATASET_ID, split="train")
 
-    use_unsloth = os.environ.get("UNSLOTH_DISABLE", "").lower() not in ("1", "true", "yes")
-    model = None
-    tokenizer = None
+    import torch
+    from peft import LoraConfig, get_peft_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    if use_unsloth:
-        try:
-            from unsloth import FastLanguageModel
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-            model, tokenizer = FastLanguageModel.from_pretrained(
-                model_name=BASE_MODEL,
-                max_seq_length=max_seq,
-                dtype=None,
-                load_in_4bit=True,
-            )
-            target_modules = [
-                "q_proj",
-                "k_proj",
-                "v_proj",
-                "o_proj",
-                "gate_proj",
-                "up_proj",
-                "down_proj",
-            ]
-            model = FastLanguageModel.get_peft_model(
-                model,
-                r=32,
-                lora_alpha=64,
-                lora_dropout=0.0,
-                target_modules=target_modules,
-                use_gradient_checkpointing="unsloth",
-            )
-        except Exception as e:
-            print(f"Unsloth path failed ({e}), falling back to PEFT+bnb.", flush=True)
-            use_unsloth = False
+    model_kwargs: dict = {"device_map": "auto", "torch_dtype": torch.bfloat16}
+    if USE_4BIT:
+        from transformers import BitsAndBytesConfig
 
-    if not use_unsloth:
-        import torch
-        from peft import LoraConfig, get_peft_model
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-        bnb = BitsAndBytesConfig(
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
-        tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        model = AutoModelForCausalLM.from_pretrained(
-            BASE_MODEL,
-            quantization_config=bnb,
-            device_map="auto",
-            torch_dtype=torch.bfloat16,
-        )
-        lora = LoraConfig(
-            r=32,
-            lora_alpha=64,
-            lora_dropout=0.0,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-            task_type="CAUSAL_LM",
-        )
-        model = get_peft_model(model, lora)
+        print("[sft] 4-bit QLoRA mode (set SEVZERO_USE_4BIT=0 for bf16 LoRA)", flush=True)
+    else:
+        print(f"[sft] bf16 LoRA mode on {BASE_MODEL} (needs ~24 GB free; recommend 80 GB GPU)", flush=True)
+
+    model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, **model_kwargs)
+    model.config.use_cache = False
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+
+    lora = LoraConfig(
+        r=32,
+        lora_alpha=64,
+        lora_dropout=0.0,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora)
+    model.print_trainable_parameters()
 
     def formatting_prompts(examples: dict) -> dict:
         texts = []
@@ -192,17 +166,18 @@ def main() -> None:
         output_dir=args.output_dir,
         max_steps=args.max_steps,
         learning_rate=args.lr,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=int(os.environ.get("SEVZERO_PER_DEVICE_BS", "2")),
+        gradient_accumulation_steps=int(os.environ.get("SEVZERO_GRAD_ACCUM", "8")),
         warmup_ratio=0.05,
         lr_scheduler_type="cosine",
-        optim="paged_adamw_8bit",
+        optim="paged_adamw_8bit" if USE_4BIT else "adamw_torch",
         bf16=True,
         seed=args.seed,
         logging_steps=1,
         report_to=report_backends,
         save_total_limit=2,
         max_length=max_seq,  # TRL >=0.21 renamed max_seq_length -> max_length
+        gradient_checkpointing=True,
     )
 
     from transformers import TrainerCallback
