@@ -126,7 +126,7 @@ def hf_answer(tok, mdl):
         p = tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         inputs = tok(p, return_tensors="pt").to(mdl.device)
         with torch.no_grad():
-            o = mdl.generate(**inputs, max_new_tokens=256, do_sample=True, temperature=0.0)
+            o = mdl.generate(**inputs, max_new_tokens=256, do_sample=False)
         gen = o[0, inputs["input_ids"].shape[1] :]
         return tok.decode(gen, skip_special_tokens=True)
 

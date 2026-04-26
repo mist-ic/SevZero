@@ -168,11 +168,17 @@ def main() -> None:
         low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
+    # Explicit device='cpu' here is critical: peft.load_peft_weights uses
+    # infer_device() which returns 'cuda' whenever torch.cuda.is_available()
+    # is True, even if the model is on CPU. The resulting safetensors load
+    # with device='cuda:0' triggers cuda init err 802 on the H200 container.
+    # Loading on CPU then .to('cuda:0') below works around it.
     model = PeftModel.from_pretrained(
         model,
         args.sft_adapter_repo,
         token=worker_token or None,
         is_trainable=True,
+        device="cpu",
     )
     if torch.cuda.is_available():
         model = model.to("cuda:0")
