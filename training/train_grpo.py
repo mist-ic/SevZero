@@ -287,6 +287,9 @@ def main() -> None:
             "env_reward": env_rewards,
         }
 
+    # NOTE: max_prompt_length was removed in TRL 1.0. Pre-truncate or filter
+    # long prompts at the dataset level if needed; GRPO uses max_completion_length
+    # for the generation cap and relies on tokenizer/dataset truncation otherwise.
     grpo = GRPOConfig(
         output_dir=args.output_dir,
         learning_rate=args.lr,
@@ -297,7 +300,6 @@ def main() -> None:
         max_steps=args.max_steps,
         num_generations=args.K,
         temperature=0.85,
-        max_prompt_length=4096,
         beta=0.04,
         lr_scheduler_type="cosine",
         use_vllm=True,
