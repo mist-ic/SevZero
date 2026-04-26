@@ -1,0 +1,11 @@
+{
+  "episodes_total_seen": 90,
+  "episodes_kept": 42,
+  "episodes_dropped": 48,
+  "mean_episode_score_kept": 0.836021,
+  "train_rows": 853,
+  "eval_rows": 80,
+  "max_prompt_token_length": 2,
+  "max_observation_user_token_budget": 2048,
+  "min_score_filter": 0.75
+}

@@ -1,13 +1,34 @@
 # Documentation and research (not part of the submission)
 Docs/
-
-# OpenEnv preparatory course (dev reference only, not part of submission)
+DocsR2/
 openenv-course/
+playbook/
+
+# Secrets — NEVER commit
+.env
+*.env
+api.env
+hg.env
+
+# Training artefacts
+training/data/raw/
+training/.preflight_grpo/
+training/runs.jsonl
+outputs/
+out/
+wandb/
+trackio/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+.venv/
+venv/
 
-# Environment
-.env
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

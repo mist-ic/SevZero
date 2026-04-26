@@ -1,0 +1,5 @@
+- **Dataset URL (after `python -m training.push_dataset`):** https://huggingface.co/datasets/Mist-ic/sevzero-expert-trajectories
+- **Rows:** see `build_stats.json` for `train_rows` and `eval_rows` after you run `build_dataset.py` on real raw JSONL.
+- **Max prompt tokens:** see `max_prompt_token_length` in `build_stats.json` — set SFT/GRPO `max_seq_length` to this + `max_completion_length` (e.g. +1024).
+- **Mean episode score:** `mean_episode_score_kept` in `build_stats.json` (episodes with final grader ≥ 0.85).
+- **Caveats:** run `collect_trajectories.py` with working `api.env`/`hg.env`; use `--no-sanity` to skip the 3 pre-flight API calls; install extras (`python-dotenv`, `google-genai`, `azure-ai-inference`, `huggingface_hub`, `datasets`, `transformers`, `pydantic`) as needed — `pyproject.toml` is unchanged.
