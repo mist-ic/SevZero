@@ -14,9 +14,9 @@ short_description: SRE incident-response environment for OpenEnv (R2)
 
 **A self-evolving SRE war-room for training on-call AI agents.**
 
-> At step fourteen, an untrained 8B model panicked and restarted the primary database, turning a minor latency spike into a regional outage. 300 steps later, it learned to throttle background jobs instead. This is SevZero.
+> At step fourteen, an untrained 8B model panicked and restarted the primary database, turning a minor latency spike into a regional outage. SevZero turns that kind of bad on-call reflex into a deterministic OpenEnv replay, then tests whether training actually changes it.
 
-**Status:** Environment, SFT, and GRPO training all complete and public. Held-out evaluation on seeds 13/99/777: SFT and GRPO are statistically flat vs the untrained baseline — see the [blog post](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md) for the honest read and the full breakdown in [`Mist-ic/sevzero-eval-results`](https://huggingface.co/datasets/Mist-ic/sevzero-eval-results).
+**Status:** Environment, SFT, and GRPO training all complete and public. Held-out evaluation on seeds 13/99/777: SFT and GRPO are flat vs the untrained baseline — see the [blog post](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md) for the honest read and the per-seed breakdown in [`Mist-ic/sevzero-eval-results`](https://huggingface.co/datasets/Mist-ic/sevzero-eval-results).
 
 In R1 we built the foundation; in R2 we turned it into a self-evolving SRE war-room: live curriculum pressure, schema drift, oversight for risky actions, and a training stack that shows up in reward curves, not just pull requests.
 
@@ -103,7 +103,7 @@ flowchart LR
 | Hard | 0.6369 | 0.6269 | 0.6369 | 0.887 |
 | **Mean** | 0.7996 | 0.7962 | 0.7996 | **0.929** |
 
-SFT and 120-step GRPO produced flat lift on the held-out seeds. The environment, training loop, and eval harness are the contribution; moving the held-out scores requires more GRPO steps and denser reward shaping, which we discuss in the [blog post](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md).
+SFT and 120-step GRPO produced flat lift on the held-out seeds. The environment, training loop, and eval harness are the contribution; moving the held-out scores likely requires a larger GRPO budget, denser hard-tier rewards, and a curriculum pass aimed at concurrent root causes, which we discuss in the [blog post](https://huggingface.co/spaces/Mist-ic/sevzero-env/blob/main/BLOG.md).
 
 **Reward curve (GRPO)** — regenerate after each run:
 
@@ -121,7 +121,7 @@ python assets/scores_bar.py path/to/eval_results.csv
 
 ![Scores by task and stage](assets/scores_bar.png)
 
-**Before / after** episode behavior: [`assets/before_after.md`](assets/before_after.md).
+**Before / after** episode behavior: [`assets/before_after.md`](assets/before_after.md). This is a negative-control replay note: it documents the same hard-tier outcome before and after GRPO, matching the flat eval table.
 
 ---
 
@@ -131,7 +131,7 @@ python assets/scores_bar.py path/to/eval_results.csv
 |--------------------|--------------------------|
 | Environment innovation (40%) | SRE sim + queueing cascades; R2: drift, oversight, curriculum, sub-reward density. |
 | Storytelling (30%) | Autopsy hook, HF blog, README, annotated plots. |
-| Reward improvement (20%) | Logged GRPO `metrics.jsonl`, curve + bar + before/after traces. |
+| Reward improvement (20%) | Logged GRPO `metrics.jsonl`, curve + bar + honest flat-result eval table. |
 | Pipeline (10%) | SFT to GRPO, TRL `rollout_func`, scripts linked below. |
 | *Themes* | World modeling (professional): multi-signal state; long-horizon: Hard tier; self-improvement: curriculum; multi-agent: oversight layer. |
 

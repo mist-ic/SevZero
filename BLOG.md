@@ -2,9 +2,9 @@
 
 ## The autopsy
 
-At step fourteen, an untrained Llama-3.1-8B-Instruct panicked and restarted the primary database, turning a minor latency spike into a regional outage. After 120 GRPO steps the same stack, on the same prompt and the same seed, throttled background jobs and waited two ticks for the queue to drain. SLO recovered. No restart.
+At step fourteen, an untrained Llama-3.1-8B-Instruct panicked and restarted the primary database, turning a minor latency spike into a regional outage. That single bad reflex became our test case for SevZero: could an 8B policy learn not to reach for a high-blast-radius action when the local evidence is noisy and the consequences arrive late?
 
-That gap is what SevZero is built to measure and shrink.
+After SFT and 120 GRPO steps, the answer on our held-out seeds was uncomfortable and useful: the training loop ran, gradients moved, but the evaluated policy stayed flat against the untrained baseline. SevZero is built for exactly that kind of measurement. It makes the gap visible instead of letting a polished demo hide it.
 
 In real on-call rotations the damage from a bad agent does not live in subtle reasoning errors. It lives in a small handful of irreversible actions taken under pressure: wrong service restarted, change applied without a rollback plan, a primary store touched when a leaf service was the actual root cause. SevZero is a deterministic, OpenEnv-native simulator that makes those actions expensive in simulation so a policy can learn to make them rare in deployment. We built it for the OpenEnv India Hackathon 2026, and this post is an honest engineering log: what is in the environment, what we trained, what broke, and what the numbers actually say.
 
@@ -151,27 +151,27 @@ The frontier ceiling is 0.929 mean, from a 28-run aggregate of Gemini-3.1-Pro on
 
 The honest read: SFT moved the needle by less than a noise floor, and **120 steps of GRPO did not move it measurably either** on these held-out seeds. On every matching (task, seed) cell we have evaluated across both GRPO runs, the score is identical to the untrained baseline to four decimal places — meaning the adapters emit the same actions as the base policy on the deterministic replay seeds. That is not the result we hoped for, but it is the result the evaluation produced, and the point of doing this on a deterministic OpenEnv simulator rather than vibe-based demos is that we cannot paper over it.
 
-What this tells us is concrete. Supervised fine-tuning on multi-turn trajectories with delayed reward teaches the model to speak the right language and to inspect before it breaks glass, but it does not teach it to act differently when the action it most wants to take is wrong. GRPO for 120 steps with K=4 rollouts against a sparse grader-based reward, on an 8B Llama LoRA, is not enough gradient signal to overwrite the base policy on held-out seeds either. Changing what the model does under pressure is what GRPO is for, and getting that to happen inside a single hackathon day was the most honest failure we ran into.
+What this tells us is concrete. Supervised fine-tuning on multi-turn trajectories with delayed reward teaches the model to speak the right language and to inspect before it breaks glass, but it does not teach it to act differently when the action it most wants to take is wrong. GRPO for 120 steps with K=4 rollouts against this grader, on an 8B Llama LoRA, was not enough signal to overwrite the base policy on the held-out replay seeds either. Changing what the model does under pressure is what GRPO is for, and getting that to happen inside a single hackathon day was the most honest failure we ran into.
 
-The full per-model breakdown lives at the public dataset [`Mist-ic/sevzero-eval-results`](https://huggingface.co/datasets/Mist-ic/sevzero-eval-results). The main table reports our best GRPO variant by held-out Hard mean. Sibling adapter `GRPO-stability` (lr `4e-6`, 120 steps) has Easy/Medium reported in the dataset; Hard-tier eval was deferred because each Hard episode runs to the 50-action ceiling and at ~18-20 minutes per episode would not have fit our final-eval budget. We chose to keep the main table tight on purpose: variants belong in the artifact, not in the headline.
+The per-seed breakdown lives at the public dataset [`Mist-ic/sevzero-eval-results`](https://huggingface.co/datasets/Mist-ic/sevzero-eval-results). The headline table reports `GRPO-primary`, because it is the only GRPO adapter with the full Easy/Medium/Hard evaluation mirrored into the final artifact. Sibling adapter `GRPO-stability` (lr `4e-6`, 120 steps) has partial Easy/Medium rows in the dataset; Hard-tier eval was deferred because each Hard episode runs to the 50-action ceiling and at ~18-20 minutes per episode would not have fit our final-eval budget.
 
 ![GRPO mean reward vs step](assets/reward_curve.png)
 
 ![Easy / medium / hard bars](assets/scores_bar.png)
 
-The reward curve and the per-tier bars regenerate from logged `metrics.jsonl` and `eval_results.csv` using the scripts in `assets/`. The figures are not pre-baked into this post precisely so that the same scripts you run locally reproduce the same images.
+The reward curve and the per-tier bars regenerate from logged GRPO metrics and eval rows using the scripts in `assets/`. The figures are not pre-baked into this post precisely so that the same scripts you run locally reproduce the same images.
 
-A medium-tier before-after action trace on the same seed is in `assets/before_after.md`.
+A matched before/after replay note is in `assets/before_after.md`. In this final version, "before/after" is intentionally a negative-control artifact: it shows the same per-seed outcomes for the untrained and GRPO-primary policies, which is the behavior behind the flat table.
 
 ## What the GRPO training loop actually showed
 
-Across the 120-step runs, the training loop produced nonzero reward variance, nonzero gradients, and a KL divergence that grew without diverging. The loss did not collapse to zero, and group standard deviation stayed alive across the run. We do not claim a clean monotonic reward curve. We claim that the loop trained: it produced gradient signal that can change behavior on the held-out seeds, and the smoke run earlier in the day completed cleanly enough to seed the full runs.
+Across the 120-step runs, the training loop produced nonzero reward variance, nonzero gradients, and a KL divergence that grew without diverging. The loss did not collapse to zero, and group standard deviation stayed alive across the run. We do not claim a clean monotonic reward curve. We claim that the loop trained mechanically: rollouts completed, rewards varied, gradients flowed, and the adapters were pushed. The eval table shows that this was not enough to change the deterministic held-out outcomes.
 
 Whether that gradient turned into measurable lift is the question the table above answers, not the question we get to assert.
 
 ## What still breaks
 
-- **Hard tier with simultaneous independent root causes.** Both untrained and SFT-primary score around 0.63 here. The honest answer in Q&A is that multi-fault hard episodes are the next curriculum axis (extend the adversarial escalator to cover concurrent root causes), not a reason to dismiss the lift on Easy and Medium if it materialized.
+- **Hard tier with simultaneous independent root causes.** Both untrained and GRPO-primary score 0.6369 here. The honest answer in Q&A is that multi-fault hard episodes are the next curriculum axis: extend the adversarial escalator to cover concurrent root causes, then give GRPO enough budget and reward density to learn from them.
 - **Schema drift edge cases.** When the drift module renames more than two fields in a single episode, semantic parsing degrades. We log this; we do not yet train against it.
 - **Oversight gaming.** Today, "asked first, then acted" can score too close to "picked the right safe action without wasting the channel." Approval needs to carry information, not vibes. This is the next reward-shaping pass.
 - **Integration fragility outlives the demo.** The pins above worked on H200 this week. The TRL cookbook you found last year is not the TRL that knows `rollout_func`. Budget time for the boring errors. They ate ours.
@@ -200,4 +200,4 @@ The training entrypoints (`train_sft.py`, `train_grpo.py`, `eval.py`, `launch_hf
 
 ---
 
-*Frontier ceiling (Gemini-3.1-Pro, 28-run aggregate, this protocol): 0.929. Untrained 8B baseline mean over held-out seeds 13, 99, 777: 0.7996. Best-GRPO mean: `__GRPO_BEST_MEAN__`. The next on-call shift starts with whatever policy we trained today.*
+*Frontier ceiling (Gemini-3.1-Pro, 28-run aggregate, this protocol): 0.929. Untrained 8B baseline mean over held-out seeds 13, 99, 777: 0.7996. Best full-eval GRPO mean: 0.7996. The next on-call shift starts with the failure mode we can now replay.*

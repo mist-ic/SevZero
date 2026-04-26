@@ -1,32 +1,36 @@
 # Before / after: episode traces
 
-Sourced from `training/eval.py` JSONL output (one JSON object per step). **Replace the tables below** with two real runs on the same task and seed: baseline checkpoint vs best GRPO checkpoint, held-out seed.
+This is the matched replay artifact behind the final blog table. It is intentionally not a victory-lap trace: on the deterministic held-out seeds, `GRPO-primary` reproduced the same aggregate behavior as the untrained baseline. That negative-control result is the point. SevZero makes it possible to say "the adapter did not change the policy enough" with exact task/seed evidence instead of relying on a demo clip.
 
 | | Untrained (baseline 8B) | GRPO-trained 8B |
 |---|------------------------|-------------------|
-| **Task / seed** | `__FILL__` / `__FILL__` | `__FILL__` / `__FILL__` |
-| **Final score** | `__FILL__` | `__FILL__` |
-| **Steps used** | `__FILL__` / `__FILL__` | `__FILL__` / `__FILL__` |
-| **Termination** | `__FILL__` | `__FILL__` |
+| **Task / seed** | `hard` / `13` | `hard` / `13` |
+| **Final score** | `0.6105` | `0.6105` |
+| **Steps used** | `50` / `50` | `50` / `50` |
+| **Termination** | `timeout` | `timeout` |
 
-## Untrained: representative failure mode
+## Untrained: representative hard-tier timeout
 
-*Draft narrative — align to actual first bad action in JSONL (e.g. high-impact restart without inspection).*
+The baseline 8B policy can produce valid tool-call syntax and survive the OpenEnv loop, but on the hard tier it does not recover SLO before the action budget expires.
 
-1. `__STEP_0__` — Observation: SLO `__FILL__`, critical services: `__FILL__`.
-2. `__STEP_1__` — `inspect_logs` on wrong service; reward noise; no root cause.
-3. `__STEP_k__` — `restart_service` on `__FILL__` without approval / wrong target; cascade widens.
-4. Late `noop` or thrash; timeout or sub-threshold SLO at end state.
+1. `reset(task="hard", seed=13)` starts the same deterministic multi-fault incident used in held-out evaluation.
+2. The policy completes the episode without a catastrophic invalid-action failure, but it consumes the full 50-step budget.
+3. Final grader components: `slo_recovery=0.6000`, `action_efficiency=1.0000`, `time_efficiency=0.2700`.
+4. Final score: `0.6105`, termination reason: `timeout`.
 
-## GRPO: matched scenario
+## GRPO-primary: matched scenario
 
-*Draft — show inspect → verify cascade → low-risk fix → optional oversight path.*
+`GRPO-primary` was evaluated on the same task and seed after 120 GRPO steps from the SFT adapter. On this replay, it reaches the same final outcome.
 
-1. `__STEP_0__` — Same seed; SLO and topology identical to column one.
-2. `__STEP_1–3__` — `inspect_metrics` / `inspect_logs` on `__FILL__` to confirm failure class.
-3. `__STEP_4__` — Remediation: `__FILL__` (e.g. `rollback_service`, `tune_config`, or approval flow for primary DB).
-4. Recovery ticks; final SLO `__FILL__`; score `__FILL__`.
+1. `reset(task="hard", seed=13)` starts an identical replay because the simulator is seeded end-to-end.
+2. The adapter also consumes the full 50-step budget.
+3. Final grader components match the baseline: `slo_recovery=0.6000`, `action_efficiency=1.0000`, `time_efficiency=0.2700`.
+4. Final score: `0.6105`, termination reason: `timeout`.
+
+## Why this still matters
+
+The trace is useful because it prevents a common hackathon failure mode: showing a good-looking isolated action sequence while the reproducible held-out eval says something else. The training loop produced nonzero rewards, gradients, and KL movement, but on the deterministic replay seeds the adapter did not alter the evaluated action outcomes. That is the next training target, not a result to hide.
 
 ---
 
-**JSONL field hints for extraction:** for each line, read `observation` / `action` / `reward` / `step` (exact keys follow `eval.py` output). Keep excerpts under 40 lines per column when pasting into the blog or video B-roll.
+**Source rows:** `training/eval.py` schema (`model`, `task`, `seed`, `score`, `slo_recovery`, `action_efficiency`, `time_efficiency`, `steps_used`, `terminated`, `termination_reason`). Baseline row comes from `_diag/eval_done.log`; GRPO-primary uses the confirmed final held-out result mirrored into `Mist-ic/sevzero-eval-results`.
