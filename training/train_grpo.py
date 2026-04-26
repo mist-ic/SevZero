@@ -180,14 +180,14 @@ def main() -> None:
         is_trainable=True,
         torch_device="cpu",
     )
-    if torch.cuda.is_available():
-        model = model.to("cuda:0")
-        torch.cuda.synchronize()
-        print(
-            f"[grpo] model on cuda:0 dtype={next(model.parameters()).dtype} "
-            f"mem_alloc={torch.cuda.memory_allocated()/1e9:.1f}GB",
-            flush=True,
-        )
+    # Do NOT call model.to("cuda:0") here. GRPOTrainer wraps the model with
+    # accelerate.prepare() which handles device placement; manual .to() after
+    # PEFT load reliably triggers cuda init err 802 on this H200 image stack.
+    # See TRL openenv reference: trainer=GRPOTrainer(model=<module on cpu>, ...).
+    print(
+        f"[grpo] model dtype={next(model.parameters()).dtype} (will be moved by accelerate)",
+        flush=True,
+    )
     # Optional env flags (future env upgrades) — no-op for baseline server
     if args.enable_schema_drift:
         os.environ["SEVZERO_SCHEMA_DRIFT"] = "1"
