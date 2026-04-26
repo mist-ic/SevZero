@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from server.failures import (
     FailureSpec,
@@ -164,7 +164,9 @@ def _pick_failure_target(
 # ---------------------------------------------------------------------------
 
 
-def generate_scenario(seed: int, task_id: str) -> ScenarioConfig:
+def generate_scenario(
+    seed: int, task_id: str, **kwargs: Any,
+) -> ScenarioConfig:
     """
     Generate a complete scenario for the given task and seed.
     Deterministic: same seed + same task_id = identical scenario.
@@ -172,24 +174,51 @@ def generate_scenario(seed: int, task_id: str) -> ScenarioConfig:
     task = get_task_definition(task_id)
     rng = random.Random(seed)
 
+    weight_map: Optional[Dict[FailureType, float]] = None
+    raw_w = kwargs.get("failure_type_weights")
+    if isinstance(raw_w, dict) and raw_w:
+        weight_map = {}
+        for k, v in raw_w.items():
+            try:
+                key = k if isinstance(k, FailureType) else FailureType(str(k))
+            except (ValueError, TypeError):
+                continue
+            weight_map[key] = float(v)
+
+    num_failures = int(task["num_failures"])
+    if kwargs.get("num_failures") is not None:
+        num_failures = int(kwargs["num_failures"])
+    bump = kwargs.get("bump_num_failures", 0) or 0
+    if bump:
+        num_failures = max(1, num_failures + int(bump))
+
+    max_steps = int(task["max_steps"])
+    if kwargs.get("max_steps") is not None:
+        max_steps = int(kwargs["max_steps"])
+    if kwargs.get("max_steps_offset"):
+        max_steps = max(3, max_steps + int(kwargs["max_steps_offset"]))
+
     # Generate graph
     difficulty = task["difficulty"]
     graph = generate_graph(difficulty, rng)
 
     # Select and place failures
-    num_failures = task["num_failures"]
     used_services: set = set()
     failure_specs: List[FailureSpec] = []
 
     if num_failures == 1:
-        ft = select_failure_type(rng)
+        ft = select_failure_type(
+            rng, weight_override=weight_map,
+        )
         target = _pick_failure_target(graph, ft, rng, used_services)
         if target:
             spec = make_failure_spec(target, ft, rng)
             failure_specs.append(spec)
             used_services.add(target)
     else:
-        failure_types = select_multi_root_failures(rng, count=num_failures)
+        failure_types = select_multi_root_failures(
+            rng, count=num_failures, weight_override=weight_map,
+        )
         for ft in failure_types:
             target = _pick_failure_target(graph, ft, rng, used_services)
             if target:
@@ -202,6 +231,6 @@ def generate_scenario(seed: int, task_id: str) -> ScenarioConfig:
         seed=seed,
         graph=graph,
         failure_specs=failure_specs,
-        max_steps=task["max_steps"],
+        max_steps=max_steps,
         description=task["description"],
     )

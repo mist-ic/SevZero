@@ -60,12 +60,17 @@ def grade_episode(
         successful = sum(1 for a in actions_taken if a.get("success", False))
         remediation_actions = sum(
             1 for a in actions_taken
-            if a.get("action") not in ("inspect_logs", "inspect_metrics", "inspect_traces", "noop")
+            if a.get("action") not in (
+                "inspect_logs", "inspect_metrics", "inspect_traces",
+                "request_approval", "noop",
+            )
             and a.get("success", False)
         )
         inspect_actions = sum(
             1 for a in actions_taken
-            if a.get("action") in ("inspect_logs", "inspect_metrics", "inspect_traces")
+            if a.get("action") in (
+                "inspect_logs", "inspect_metrics", "inspect_traces", "request_approval",
+            )
         )
 
         # Good ratio: some inspection + targeted remediation
