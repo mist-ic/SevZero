@@ -34,3 +34,7 @@ dev = [
     "pytest>=7.0.0",
     "httpx>=0.24.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["_recovery", ".git", "outputs", "training/data", "playbook", "DocsR2"]

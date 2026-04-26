@@ -332,6 +332,8 @@ class Simulator:
             record["note"] = "Approval request recorded (manager will respond next tick)"
             return record
 
+        service_id = params.get("service_id")
+
         if action_type == "inspect_logs":
             return self._do_inspect_logs(service_id, record)
         elif action_type == "inspect_metrics":
